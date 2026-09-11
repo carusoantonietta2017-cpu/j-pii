@@ -6,6 +6,10 @@ import { restore, restoreDeep, type Analyzer, type DoubtfulSpan } from "./mask.t
 import { createSessionStore, type SessionStore } from "./store.ts";
 import { reviewDoubtful } from "./review.ts";
 import { rizzoAnalyzer } from "./rizzo.ts";
+import { resolveConfig } from "./config.ts";
+import { ensureSidecar, type ManagedSidecar } from "./sidecar.ts";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CF_RE = /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/;
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
@@ -25,16 +29,31 @@ function regexDetections(text: string) {
 	return out;
 }
 
-// Analyzer selection: fake regex shapes by default (no model needed);
-// JPII_ANALYZER=real talks to the local rizzo-pii sidecar, whose
-// validated flags drive the doubtful-span review.
+// Analyzer selection: the local rizzo-pii sidecar by default (lazy:
+// spawned on first masked call, reused while healthy, stopped with the
+// session); JPII_ANALYZER=fake selects the offline regex shapes.
 // T1 fake: regex shapes where rizzo-pii detections flow in tests.
 export const fakeAnalyzer: Analyzer = { analyze: async (text) => regexDetections(text) };
 
-const analyzer: Analyzer =
-	process.env.JPII_ANALYZER === "real"
-		? rizzoAnalyzer(process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005")
-		: fakeAnalyzer;
+const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "rizzo-pii", "src", "app");
+let sidecar: ManagedSidecar | undefined;
+let realAnalyzer: Analyzer | undefined;
+
+async function getAnalyzer(): Promise<Analyzer> {
+	const cfg = resolveConfig();
+	if (cfg.analyzer === "fake") return fakeAnalyzer;
+	if (!realAnalyzer) {
+		sidecar = await ensureSidecar({
+			command: cfg.python,
+			args: [join(APP_DIR, "app.py"), "--port", String(cfg.port)],
+			cwd: APP_DIR,
+			env: cfg.modelDir ? { PII_MODEL_DIR: cfg.modelDir } : {},
+			healthUrl: `${cfg.sidecarUrl}/health`,
+		});
+		realAnalyzer = rizzoAnalyzer(cfg.sidecarUrl);
+	}
+	return realAnalyzer;
+}
 
 // Session-scoped mapping (T3): canonical store plus the cumulative
 // placeholder→value map used for restore. Both reset on session
@@ -63,17 +82,24 @@ export function partitionDecided(
 	return { autoForce, autoClear, fresh };
 }
 
-function resetSession() {
+async function resetSession() {
 	store = createSessionStore();
 	sessionMapping.clear();
 	forcedKeys.clear();
 	clearedKeys.clear();
+	if (sidecar) {
+		await sidecar.stop();
+		sidecar = undefined;
+		realAnalyzer = undefined;
+	}
 }
 
 export async function maskStrings<T>(value: T): Promise<{ result: T; doubtful: DoubtfulSpan[] }> {
 	const doubtful: DoubtfulSpan[] = [];
 	const maskText = async (t: string): Promise<string> => {
-		const r = await store.mask(t, analyzer);
+		const analyzer = await getAnalyzer();
+		const { excludeLabels } = resolveConfig();
+		const r = await store.mask(t, analyzer, { excludeLabels });
 		for (const [ph, val] of r.mapping) sessionMapping.set(ph, val);
 		for (const d of r.doubtful) {
 			if (!doubtful.some((x) => x.value === d.value && x.label === d.label)) doubtful.push(d);
@@ -112,14 +138,25 @@ export async function maskStrings<T>(value: T): Promise<{ result: T; doubtful: D
 						list.map(async (m) => {
 							if (typeof m === "string") return maskText(m);
 							if (m && typeof m === "object") {
-								const mm = { ...(m as Record<string, unknown>) };
+								const mm = m as Record<string, unknown>;
+								// PII enters through the user and tool outputs only.
+								// System/developer prompts, tool schemas and the
+								// assistant history are trusted and skipped.
+								const role = mm.role;
+								const kind = mm.type;
+								const untrusted =
+									role === "user" ||
+									role === "tool" ||
+									(typeof kind === "string" && kind.includes("output"));
+								if (!untrusted) return m;
+								const out: Record<string, unknown> = { ...mm };
 								for (const field of ["content", "output", "text"] as const) {
 									const f = mm[field];
 									if (typeof f === "string" || Array.isArray(f)) {
-										mm[field] = await walkContent(f);
+										out[field] = await walkContent(f);
 									}
 								}
-								return mm;
+							return out;
 							}
 							return m;
 						}),
@@ -153,11 +190,11 @@ function applyForced(value: unknown, forced: Map<string, string>): unknown {
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", () => {
-		resetSession();
+		void resetSession();
 	});
 
 	pi.on("session_shutdown", () => {
-		resetSession();
+		void resetSession();
 	});
 
 	pi.on("before_provider_request", async (event, ctx) => {
@@ -179,7 +216,12 @@ export default function (pi: ExtensionAPI) {
 					`j-pii doubtful ${span.label}: "${span.value}" — mask it?`,
 					["Mask it", "Send in clear"],
 				);
-				if (choice === undefined) throw new Error("j-pii review dismissed, failing closed");
+				if (choice === undefined) {
+						throw new Error(
+							"j-pii review dismissed, failing closed on: " +
+								fresh.map((x) => `${x.label} "${x.value}"`).join(", "),
+						);
+					}
 				return choice === "Mask it" ? "mask" : "clear";
 			});
 			for (const span of force) {
@@ -199,7 +241,9 @@ export default function (pi: ExtensionAPI) {
 		} catch (err) {
 		// Fail closed: never let the original (unmasked) payload through.
 		// An empty object makes the provider reject the request outright.
-		ctx.ui.notify(`j-pii blocked a request: ${err instanceof Error ? err.message : String(err)}`, "error");
+		const msg = err instanceof Error ? err.message : String(err);
+			console.error(`[j-pii] blocked a request: ${msg}`);
+			ctx.ui.notify(`j-pii blocked a request: ${msg}`, "error");
 			return {};
 		}
 	});

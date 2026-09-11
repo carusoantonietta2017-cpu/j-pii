@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createSessionStore } from "./store.ts";
 import { reviewDoubtful, type DoubtfulSpan } from "./review.ts";
+import { partitionDecided } from "./j-pii.ts";
 import type { Analyzer } from "./mask.ts";
 
 const CF = "RSSMRA80A01H501U";
@@ -54,4 +55,17 @@ test("reviewDoubtful routes spans by human decision", async () => {
 	assert.deepEqual(masked, { force: spans, cleared: [] });
 	const cleared = await reviewDoubtful(spans, async () => "clear");
 	assert.deepEqual(cleared, { force: [], cleared: spans });
+});
+
+test("partitionDecided remembers past choices", () => {
+	const a = { value: "x", label: "L" };
+	const b = { value: "y", label: "L" };
+	const c = { value: "z", label: "L" };
+	const forced = new Set(["L x"]);
+	const cleared = new Set(["L y"]);
+	assert.deepEqual(partitionDecided([a, b, c], forced, cleared), {
+		autoForce: [a],
+		autoClear: [b],
+		fresh: [c],
+	});
 });
