@@ -8,7 +8,7 @@ import { reviewDoubtful } from "./review.ts";
 import { rizzoAnalyzer } from "./rizzo.ts";
 import { resolveConfig } from "./config.ts";
 import { ensureSidecar, type ManagedSidecar } from "./sidecar.ts";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CF_RE = /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/;
@@ -39,12 +39,15 @@ const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "rizzo-pii",
 let sidecar: ManagedSidecar | undefined;
 let realAnalyzer: Analyzer | undefined;
 
-async function getAnalyzer(): Promise<Analyzer> {
+async function getAnalyzer(cwd = "."): Promise<Analyzer> {
 	const cfg = resolveConfig();
 	if (cfg.analyzer === "fake") return fakeAnalyzer;
 	if (!realAnalyzer) {
+		// Relative interpreter paths resolve against the project dir:
+		// the sidecar itself runs with cwd inside rizzo-pii.
+		const python = isAbsolute(cfg.python) ? cfg.python : resolve(cwd, cfg.python);
 		sidecar = await ensureSidecar({
-			command: cfg.python,
+			command: python,
 			args: [join(APP_DIR, "app.py"), "--port", String(cfg.port)],
 			cwd: APP_DIR,
 			env: cfg.modelDir ? { PII_MODEL_DIR: cfg.modelDir } : {},
@@ -94,10 +97,10 @@ async function resetSession() {
 	}
 }
 
-export async function maskStrings<T>(value: T): Promise<{ result: T; doubtful: DoubtfulSpan[] }> {
+export async function maskStrings<T>(value: T, cwd = "."): Promise<{ result: T; doubtful: DoubtfulSpan[] }> {
 	const doubtful: DoubtfulSpan[] = [];
 	const maskText = async (t: string): Promise<string> => {
-		const analyzer = await getAnalyzer();
+		const analyzer = await getAnalyzer(cwd);
 		const { excludeLabels } = resolveConfig();
 		const r = await store.mask(t, analyzer, { excludeLabels });
 		for (const [ph, val] of r.mapping) sessionMapping.set(ph, val);
@@ -199,7 +202,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", async (event, ctx) => {
 		try {
-			const { result, doubtful } = await maskStrings(JSON.parse(JSON.stringify(event.payload)));
+			const { result, doubtful } = await maskStrings(JSON.parse(JSON.stringify(event.payload)), ctx.cwd);
 			if (doubtful.length === 0) return result;
 			const { autoForce, autoClear, fresh } = partitionDecided(doubtful, forcedKeys, clearedKeys);
 			const forced = new Map<string, string>();

@@ -63,3 +63,16 @@ test("reuses a running server without owning it", async () => {
 		server.close();
 	}
 });
+
+test("bad interpreter fails with a clear error instead of crashing", async () => {
+	const port = await freePort();
+	await assert.rejects(
+		ensureSidecar({
+			command: "/nonexistent/python",
+			args: [],
+			healthUrl: `http://127.0.0.1:${port}/health`,
+			readyTimeoutMs: 5000,
+		}),
+		/check JPII_PYTHON/,
+	);
+});

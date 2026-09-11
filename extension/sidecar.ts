@@ -27,8 +27,14 @@ async function healthy(url: string): Promise<boolean> {
 	}
 }
 
-function waitForExit(child: ChildProcess): Promise<void> {
+function waitForSettled(child: ChildProcess, onError: (e: Error) => void): Promise<void> {
 	return new Promise((resolve) => {
+		// A failed spawn emits 'error' (and maybe never 'exit'): without
+		// this listener node throws uncaught and takes pi down with it.
+		child.once("error", (e) => {
+			onError(e as Error);
+			resolve();
+		});
 		if (child.exitCode !== null) resolve();
 		else child.once("exit", () => resolve());
 	});
@@ -42,7 +48,10 @@ export async function ensureSidecar(opts: SidecarOptions): Promise<ManagedSideca
 		stdio: "ignore",
 		detached: false,
 	});
-	const childGone = waitForExit(child);
+	let spawnError: Error | undefined;
+	const childGone = waitForSettled(child, (e) => {
+		spawnError = e;
+	});
 	const deadline = Date.now() + (opts.readyTimeoutMs ?? 90000);
 	const pollMs = opts.pollMs ?? 250;
 	for (;;) {
@@ -54,6 +63,9 @@ export async function ensureSidecar(opts: SidecarOptions): Promise<ManagedSideca
 					await childGone;
 				},
 			};
+		}
+		if (spawnError) {
+			throw new Error(`j-pii cannot start sidecar (check JPII_PYTHON): ${spawnError.message}`);
 		}
 		if (child.exitCode !== null) {
 			throw new Error(`j-pii sidecar exited before becoming healthy (code ${child.exitCode})`);
