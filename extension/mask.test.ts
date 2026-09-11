@@ -2,7 +2,7 @@
 // Vocabulary from CONTEXT.md: placeholder, mapping, mask, restore.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mask, restore, type Analyzer } from "./mask.ts";
+import { mask, restore, restoreDeep, type Analyzer } from "./mask.ts";
 
 const CF = "RSSMRA80A01H501U";
 
@@ -47,4 +47,24 @@ test("restore swaps placeholders back, leaving unknown ones untouched", () => {
 		restore("codice [CF_1], mail [EMAIL_1], ignoto [CF_9]", mapping),
 		`codice ${CF}, mail mario.rossi@example.it, ignoto [CF_9]`,
 	);
+});
+
+test("restoreDeep swaps placeholders in nested tool args", () => {
+	const mapping = new Map([["[CF_1]", CF]]);
+	const args = {
+		path: "/tmp/x.txt",
+		content: `cf [CF_1] ok [CF_9]`,
+		edits: [{ old: "a [CF_1] b" }],
+		n: 3,
+		ok: true,
+		nil: null,
+	};
+	assert.deepEqual(restoreDeep(args, mapping), {
+		path: "/tmp/x.txt",
+		content: `cf ${CF} ok [CF_9]`,
+		edits: [{ old: `a ${CF} b` }],
+		n: 3,
+		ok: true,
+		nil: null,
+	});
 });

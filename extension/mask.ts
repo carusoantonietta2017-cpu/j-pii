@@ -63,6 +63,19 @@ export function restore(text: string, mapping: Map<string, string>): string {
 	return out;
 }
 
+/** Restore placeholders in nested structures (tool args): strings are
+restored, unknown placeholders and non-strings pass through untouched. */
+export function restoreDeep<T>(value: T, mapping: Map<string, string>): T {
+	if (typeof value === "string") return restore(value, mapping) as T;
+	if (Array.isArray(value)) return value.map((v) => restoreDeep(v, mapping)) as T;
+	if (value && typeof value === "object") {
+		const o: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(value)) o[k] = restoreDeep(v, mapping);
+		return o as T;
+	}
+	return value;
+}
+
 export async function mask(
 	text: string,
 	analyzer: Analyzer,
