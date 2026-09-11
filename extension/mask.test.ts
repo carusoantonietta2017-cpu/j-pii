@@ -7,21 +7,21 @@ import { mask, restore, type Analyzer } from "./mask.ts";
 const CF = "RSSMRA80A01H501U";
 
 const fakeAnalyzer: Analyzer = {
-	analyze: (text: string) => {
+	analyze: async (text: string) => {
 		const i = text.indexOf(CF);
 		return i === -1 ? [] : [{ start: i, end: i + CF.length, label: "CF" }];
 	},
 };
 
-test("mask replaces a detected span with its placeholder", () => {
-	const { masked, mapping } = mask(`codice ${CF} fine`, fakeAnalyzer);
+test("mask replaces a detected span with its placeholder", async () => {
+	const { masked, mapping } = await mask(`codice ${CF} fine`, fakeAnalyzer);
 	assert.equal(masked, "codice [CF_1] fine");
 	assert.equal(mapping.get("[CF_1]"), CF);
 });
 
-test("mask reuses the placeholder for a repeated value", () => {
+test("mask reuses the placeholder for a repeated value", async () => {
 	const repeating: Analyzer = {
-		analyze: (text: string) => {
+		analyze: async (text: string) => {
 			const out = [];
 			let from = 0;
 			for (;;) {
@@ -33,7 +33,7 @@ test("mask reuses the placeholder for a repeated value", () => {
 			return out;
 		},
 	};
-	const { masked, mapping } = mask(`${CF} e ${CF}`, repeating);
+	const { masked, mapping } = await mask(`${CF} e ${CF}`, repeating);
 	assert.equal(masked, "[CF_1] e [CF_1]");
 	assert.equal(mapping.size, 1);
 });

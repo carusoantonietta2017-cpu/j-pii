@@ -23,14 +23,14 @@ function regexDetections(text: string) {
 }
 
 // T1 fake: regex shapes where rizzo-pii detections will flow from T2.
-export const fakeAnalyzer: Analyzer = { analyze: regexDetections };
+export const fakeAnalyzer: Analyzer = { analyze: async (text) => regexDetections(text) };
 
 // Naive session mapping (T3 replaces with the lifecycle-managed store).
 const sessionMapping = new Map<string, string>();
 
-function maskStrings<T>(value: T): T {
+async function maskStrings<T>(value: T): Promise<T> {
 	if (typeof value === "string") {
-		const { masked, mapping } = mask(value, fakeAnalyzer);
+		const { masked, mapping } = await mask(value, fakeAnalyzer);
 		for (const [ph, v] of mapping) sessionMapping.set(ph, v);
 		return masked as T;
 	}
