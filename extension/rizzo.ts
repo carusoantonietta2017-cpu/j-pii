@@ -1,15 +1,21 @@
 // rizzo-pii bridge: adapts the local sidecar HTTP contract
-// (POST /analyze → {mapping: {placeholder: value}, ...}) to the Analyzer
-// seam. Same value reuses the same placeholder because mapping keys are
-// unique per value; offsets are located in the source text.
+// (POST /analyze → segments with {label, ph, src, validated, t})
+// to the Analyzer seam. Entity segments arrive in document order, so a
+// cursor locates each original value exactly once — repeats resolve in
+// order and validated flags ride along for the review policy.
 import type { Analyzer, Detection } from "./mask.ts";
+
+interface EntitySegment {
+	label?: string;
+	ph?: string;
+	validated?: boolean;
+	t?: string;
+}
 
 interface AnalyzeResponse {
 	mapping?: Record<string, string>;
-	anonymized_text?: string;
+	segments?: EntitySegment[];
 }
-
-const PLACEHOLDER = /^\[([A-Z_]+)_\d+\]$/;
 
 export function rizzoAnalyzer(baseUrl: string): Analyzer {
 	return {
@@ -24,19 +30,19 @@ export function rizzoAnalyzer(baseUrl: string): Analyzer {
 			if (!data || typeof data.mapping !== "object" || data.mapping === null) {
 				throw new Error("rizzo-pii contract broken: response has no mapping object");
 			}
-			const detections: Detection[] = [];
-			for (const [ph, value] of Object.entries(data.mapping)) {
-				const m = PLACEHOLDER.exec(ph);
-				if (!m || typeof value !== "string" || value.length === 0) continue;
-				let from = 0;
-				for (;;) {
-					const i = text.indexOf(value, from);
-					if (i === -1) break;
-					detections.push({ start: i, end: i + value.length, label: m[1] });
-					from = i + value.length;
-				}
+			if (!Array.isArray(data.segments)) {
+				throw new Error("rizzo-pii contract broken: response has no segments array");
 			}
-			return detections.sort((a, b) => a.start - b.start);
+			const detections: Detection[] = [];
+			let cursor = 0;
+			for (const seg of data.segments) {
+				if (typeof seg.label !== "string" || typeof seg.t !== "string" || seg.t.length === 0) continue;
+				const i = text.indexOf(seg.t, cursor);
+				if (i === -1) continue;
+				detections.push({ start: i, end: i + seg.t.length, label: seg.label, validated: seg.validated });
+				cursor = i + seg.t.length;
+			}
+			return detections;
 		},
 	};
 }

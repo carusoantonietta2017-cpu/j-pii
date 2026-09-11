@@ -11,7 +11,11 @@ const TEXT = `Mario Rossi, codice fiscale ${CF}`;
 const CANNED = {
 	mapping: { "[CF_1]": CF, "[FULLNAME_1]": "Mario Rossi" },
 	anonymized_text: "[FULLNAME_1], codice fiscale [CF_1]",
-	segments: [],
+	segments: [
+		{ label: "FULLNAME", ph: "[FULLNAME_1]", src: "modello", validated: false, t: "Mario Rossi" },
+		{ t: ", codice fiscale " },
+		{ label: "CF", ph: "[CF_1]", src: "regex", validated: true, t: CF },
+	],
 };
 
 function cannedServer(body: unknown): Promise<{ server: Server; url: string }> {
@@ -39,8 +43,8 @@ test("bridge maps rizzo-pii mapping entries to detections with source offsets", 
 	try {
 		const detections = await rizzoAnalyzer(url).analyze(TEXT);
 		assert.deepEqual(detections, [
-			{ start: 0, end: 11, label: "FULLNAME" },
-			{ start: TEXT.indexOf(CF), end: TEXT.indexOf(CF) + CF.length, label: "CF" },
+			{ start: 0, end: 11, label: "FULLNAME", validated: false },
+			{ start: TEXT.indexOf(CF), end: TEXT.indexOf(CF) + CF.length, label: "CF", validated: true },
 		]);
 	} finally {
 		server.close();

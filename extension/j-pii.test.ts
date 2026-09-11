@@ -16,10 +16,11 @@ test("deep walk resolves everything and preserves structure", async () => {
 		nothing: null,
 	};
 	const out = await maskStrings(payload);
-	assert.equal(out.model, "muse-spark-1.3-contributor-free");
-	assert.equal(out.messages[0].content, "dato [CF_1] fine");
-	assert.equal(out.count, 3);
-	assert.equal(out.flag, true);
-	assert.equal(out.nothing, null);
-	assert.equal(JSON.stringify(out).includes("RSSMRA"), false);
+	assert.equal(out.result.model, "muse-spark-1.3-contributor-free");
+	assert.equal(out.result.messages[0].content, "dato [CF_1] fine");
+	assert.equal(out.result.count, 3);
+	assert.equal(out.result.flag, true);
+	assert.equal(out.result.nothing, null);
+	assert.equal(JSON.stringify(out.result).includes("RSSMRA"), false);
+	assert.deepEqual(out.doubtful, []);
 });

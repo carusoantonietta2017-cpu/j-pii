@@ -5,10 +5,17 @@ export interface Detection {
 	start: number;
 	end: number;
 	label: string;
+	/** Checksum- or rule-verified. Undefined = unknown provenance, auto-masked. */
+	validated?: boolean;
 }
 
 export interface Analyzer {
 	analyze(text: string): Promise<Detection[]>;
+}
+
+export interface DoubtfulSpan {
+	value: string;
+	label: string;
 }
 
 export interface MaskPolicy {
@@ -16,9 +23,11 @@ export interface MaskPolicy {
 	excludeLabels?: readonly string[];
 	/** Detections shorter than this are dropped as noise. */
 	minLength?: number;
+	/** Hold unvalidated detections out for human review instead of masking. */
+	reviewUnvalidated?: boolean;
 }
 
-const DEFAULT_POLICY: Required<MaskPolicy> = { excludeLabels: [], minLength: 2 };
+const DEFAULT_POLICY: Required<MaskPolicy> = { excludeLabels: [], minLength: 2, reviewUnvalidated: true };
 
 export function filterDetections(
 	text: string,
@@ -58,7 +67,7 @@ export async function mask(
 	text: string,
 	analyzer: Analyzer,
 	policy: MaskPolicy = {},
-): Promise<MaskResult> {
+): Promise<MaskResult & { doubtful: DoubtfulSpan[] }> {
 	const mapping = new Map<string, string>();
 	const counters = new Map<string, number>();
 	const seen = new Map<string, string>();
@@ -69,8 +78,16 @@ export async function mask(
 	);
 	let out = "";
 	let pos = 0;
+	const p = { ...DEFAULT_POLICY, ...policy };
+	const doubtful: DoubtfulSpan[] = [];
 	for (const s of spans) {
 		const value = text.slice(s.start, s.end);
+		if (p.reviewUnvalidated && s.validated === false) {
+			doubtful.push({ value, label: s.label });
+			out += text.slice(pos, s.end);
+			pos = s.end;
+			continue;
+		}
 		const key = `${s.label} ${value}`;
 		let ph = seen.get(key);
 		if (!ph) {
@@ -88,5 +105,5 @@ export async function mask(
 	if (leaked.length > 0) {
 		throw new Error(`j-pii leak detected, failing closed: masked output still contains ${leaked.length} value(s)`);
 	}
-	return { masked, mapping };
+	return { masked, mapping, doubtful };
 }

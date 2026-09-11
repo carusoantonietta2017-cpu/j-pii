@@ -2,8 +2,10 @@
 // mask/restore core; analyzer is fake here (T2 plugs in rizzo-pii),
 // session mapping is a naive module map (T3 builds the real store).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { restore, type Analyzer } from "./mask.ts";
+import { restore, type Analyzer, type DoubtfulSpan } from "./mask.ts";
 import { createSessionStore, type SessionStore } from "./store.ts";
+import { reviewDoubtful } from "./review.ts";
+import { rizzoAnalyzer } from "./rizzo.ts";
 
 const CF_RE = /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/;
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
@@ -23,8 +25,16 @@ function regexDetections(text: string) {
 	return out;
 }
 
-// T1 fake: regex shapes where rizzo-pii detections will flow from T2.
+// Analyzer selection: fake regex shapes by default (no model needed);
+// JPII_ANALYZER=real talks to the local rizzo-pii sidecar, whose
+// validated flags drive the doubtful-span review.
+// T1 fake: regex shapes where rizzo-pii detections flow in tests.
 export const fakeAnalyzer: Analyzer = { analyze: async (text) => regexDetections(text) };
+
+const analyzer: Analyzer =
+	process.env.JPII_ANALYZER === "real"
+		? rizzoAnalyzer(process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005")
+		: fakeAnalyzer;
 
 // Session-scoped mapping (T3): canonical store plus the cumulative
 // placeholder→value map used for restore. Both reset on session
@@ -37,17 +47,39 @@ function resetSession() {
 	sessionMapping.clear();
 }
 
-export async function maskStrings<T>(value: T): Promise<T> {
+export async function maskStrings<T>(value: T): Promise<{ result: T; doubtful: DoubtfulSpan[] }> {
+	const doubtful: DoubtfulSpan[] = [];
+	const walk = async (v: unknown): Promise<unknown> => {
+		if (typeof v === "string") {
+			const r = await store.mask(v, analyzer);
+			for (const [ph, val] of r.mapping) sessionMapping.set(ph, val);
+			for (const d of r.doubtful) {
+				if (!doubtful.some((x) => x.value === d.value && x.label === d.label)) doubtful.push(d);
+			}
+			return r.masked;
+		}
+		if (Array.isArray(v)) return Promise.all(v.map(walk));
+		if (v && typeof v === "object") {
+			const o: Record<string, unknown> = {};
+			for (const [k, x] of Object.entries(v)) o[k] = await walk(x);
+			return o;
+		}
+		return v;
+	};
+	return { result: (await walk(value)) as T, doubtful };
+}
+
+function applyForced(value: unknown, forced: Map<string, string>): unknown {
 	if (typeof value === "string") {
-		const { masked, mapping } = await store.mask(value, fakeAnalyzer);
-		for (const [ph, v] of mapping) sessionMapping.set(ph, v);
-		return masked as T;
+		let out = value;
+		for (const [ph, val] of forced) out = out.split(val).join(ph);
+		return out;
 	}
-	if (Array.isArray(value)) return (await Promise.all(value.map(maskStrings))) as T;
+	if (Array.isArray(value)) return value.map((v) => applyForced(v, forced));
 	if (value && typeof value === "object") {
 		const o: Record<string, unknown> = {};
-		for (const [k, v] of Object.entries(value)) o[k] = await maskStrings(v);
-		return o as T;
+		for (const [k, v] of Object.entries(value)) o[k] = applyForced(v, forced);
+		return o;
 	}
 	return value;
 }
@@ -63,7 +95,29 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", async (event, ctx) => {
 		try {
-			return await maskStrings(JSON.parse(JSON.stringify(event.payload)));
+			const { result, doubtful } = await maskStrings(JSON.parse(JSON.stringify(event.payload)));
+			if (doubtful.length === 0) return result;
+			const { force, cleared } = await reviewDoubtful(doubtful, async (span) => {
+				const choice = await ctx.ui.select(
+					`j-pii doubtful ${span.label}: "${span.value}" — mask it?`,
+					["Mask it", "Send in clear"],
+				);
+				if (choice === undefined) throw new Error("j-pii review dismissed, failing closed");
+				return choice === "Mask it" ? "mask" : "clear";
+			});
+			const forced = new Map<string, string>();
+			for (const span of force) {
+				const ph = store.forceMask(span.value, span.label);
+				forced.set(ph, span.value);
+				sessionMapping.set(ph, span.value);
+			}
+			for (const span of cleared) {
+				console.error(`[j-pii] explicit send-in-clear: ${span.label} "${span.value}"`);
+			}
+			if (cleared.length > 0) {
+				ctx.ui.notify(`j-pii: ${cleared.length} doubtful span(s) sent in clear by your choice`, "warning");
+			}
+				return applyForced(result, forced);
 		} catch (err) {
 		// Fail closed: never let the original (unmasked) payload through.
 		// An empty object makes the provider reject the request outright.
