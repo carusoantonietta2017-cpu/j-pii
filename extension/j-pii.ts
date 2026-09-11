@@ -2,7 +2,8 @@
 // mask/restore core; analyzer is fake here (T2 plugs in rizzo-pii),
 // session mapping is a naive module map (T3 builds the real store).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { mask, restore, type Analyzer } from "./mask.ts";
+import { restore, type Analyzer } from "./mask.ts";
+import { createSessionStore, type SessionStore } from "./store.ts";
 
 const CF_RE = /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/;
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
@@ -25,19 +26,27 @@ function regexDetections(text: string) {
 // T1 fake: regex shapes where rizzo-pii detections will flow from T2.
 export const fakeAnalyzer: Analyzer = { analyze: async (text) => regexDetections(text) };
 
-// Naive session mapping (T3 replaces with the lifecycle-managed store).
+// Session-scoped mapping (T3): canonical store plus the cumulative
+// placeholder→value map used for restore. Both reset on session
+// boundaries; nothing is persisted.
+let store: SessionStore = createSessionStore();
 const sessionMapping = new Map<string, string>();
 
-async function maskStrings<T>(value: T): Promise<T> {
+function resetSession() {
+	store = createSessionStore();
+	sessionMapping.clear();
+}
+
+export async function maskStrings<T>(value: T): Promise<T> {
 	if (typeof value === "string") {
-		const { masked, mapping } = await mask(value, fakeAnalyzer);
+		const { masked, mapping } = await store.mask(value, fakeAnalyzer);
 		for (const [ph, v] of mapping) sessionMapping.set(ph, v);
 		return masked as T;
 	}
-	if (Array.isArray(value)) return value.map(maskStrings) as T;
+	if (Array.isArray(value)) return (await Promise.all(value.map(maskStrings))) as T;
 	if (value && typeof value === "object") {
 		const o: Record<string, unknown> = {};
-		for (const [k, v] of Object.entries(value)) o[k] = maskStrings(v);
+		for (const [k, v] of Object.entries(value)) o[k] = await maskStrings(v);
 		return o as T;
 	}
 	return value;
@@ -45,7 +54,11 @@ async function maskStrings<T>(value: T): Promise<T> {
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", () => {
-		sessionMapping.clear();
+		resetSession();
+	});
+
+	pi.on("session_shutdown", () => {
+		resetSession();
 	});
 
 	pi.on("before_provider_request", (event) => {
