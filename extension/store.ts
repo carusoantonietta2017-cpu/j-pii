@@ -3,9 +3,10 @@
 // always yields the same session placeholder. In-memory only; clear()
 // wipes everything (session isolation — nothing is persisted).
 import type { Analyzer } from "./mask.ts";
+import { assertNoLeak, filterDetections, type MaskPolicy } from "./mask.ts";
 
 export interface SessionStore {
-	mask(text: string, analyzer: Analyzer): Promise<{ masked: string; mapping: Map<string, string> }>;
+	mask(text: string, analyzer: Analyzer, policy?: MaskPolicy): Promise<{ masked: string; mapping: Map<string, string> }>;
 	clear(): void;
 	readonly size: number;
 }
@@ -16,9 +17,13 @@ export function createSessionStore(): SessionStore {
 	const counters = new Map<string, number>();
 
 	return {
-		async mask(text: string, analyzer: Analyzer) {
+		async mask(text: string, analyzer: Analyzer, policy: MaskPolicy = {}) {
 			const mapping = new Map<string, string>();
-			const spans = [...(await analyzer.analyze(text))].sort((a, b) => a.start - b.start);
+			const spans = filterDetections(
+				text,
+			[...(await analyzer.analyze(text))].sort((a, b) => a.start - b.start),
+				policy,
+			);
 			let out = "";
 			let pos = 0;
 			for (const s of spans) {
@@ -36,7 +41,12 @@ export function createSessionStore(): SessionStore {
 				out += text.slice(pos, s.start) + ph;
 				pos = s.end;
 			}
-			return { masked: out + text.slice(pos), mapping };
+			const masked = out + text.slice(pos);
+			const leaked = assertNoLeak(masked, mapping);
+			if (leaked.length > 0) {
+				throw new Error(`j-pii leak detected, failing closed: masked output still contains ${leaked.length} value(s)`);
+			}
+			return { masked, mapping };
 		},
 		clear() {
 			canonical.clear();

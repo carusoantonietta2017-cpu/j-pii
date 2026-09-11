@@ -61,8 +61,15 @@ export default function (pi: ExtensionAPI) {
 		resetSession();
 	});
 
-	pi.on("before_provider_request", (event) => {
-		return maskStrings(JSON.parse(JSON.stringify(event.payload)));
+	pi.on("before_provider_request", async (event, ctx) => {
+		try {
+			return await maskStrings(JSON.parse(JSON.stringify(event.payload)));
+		} catch (err) {
+		// Fail closed: never let the original (unmasked) payload through.
+		// An empty object makes the provider reject the request outright.
+		ctx.ui.notify(`j-pii blocked a request: ${err instanceof Error ? err.message : String(err)}`, "error");
+			return {};
+		}
 	});
 
 	pi.on("message_end", (event) => {
