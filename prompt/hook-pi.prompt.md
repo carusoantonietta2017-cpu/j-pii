@@ -1,0 +1,3 @@
+Usando la skill wayfinder voglio ragionare per creare un mio progetto che usa rizzo-pii che trovi scaricato qui come hook del pi agent.
+In particolare ogni file o testo letto dal pi agent deve essere filtrato per analizzarlo con rizzo-pii mascherare i dati sensibili e poi mandarli all'LLM. Quando l'LLM risponde voglio che mi dia i codici che poi rizzo-pii deve sostituire nuovamente e dargli il valore giusto.
+Facciamo uno studio di fattibilità, poi un piano di lavoro ed infine il progetto.

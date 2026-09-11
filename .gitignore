@@ -1,0 +1,53 @@
+# ── secrets: mai nel repo (i template *.example restano versionati) ──
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*credentials*.json
+*secrets*.json
+.aws/
+.gcp/
+service-account*.json
+
+# ── python ──
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── ML artifacts: pesi e dataset si scaricano/generano, non si committano ──
+*.safetensors
+*.bin
+*.onnx
+*.pt
+*.pth
+*.h5
+*.ckpt
+models/
+checkpoints/
+
+# ── node / tauri ──
+node_modules/
+target/
+src-tauri/target/
+WixTools/
+
+# ── OS / IDE ──
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
+
+# ── scratch locale (il tracker è GitHub, non i file) ──
+.scratch/
