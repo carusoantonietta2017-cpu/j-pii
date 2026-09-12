@@ -264,13 +264,70 @@ export function createApp() {
 				return send(res, 404, { error: "rotta sconosciuta" });
 			}
 
-			// POST /api/chat (SSE echo fino a u3)
+			// POST /api/chat/new  (nuova conversazione dock)
+			if (req.method === "POST" && url.pathname === "/api/chat/new") {
+				const { resetSession } = await import("./dock.mjs");
+				resetSession();
+				return send(res, 200, { reset: true });
+			}
+
+			// POST /api/chat {message, images?[{name,dataBase64}], ocr?, sensitive?}  (SSE dock)
 			if (req.method === "POST" && url.pathname === "/api/chat") {
-				const body = JSON.parse((await readBody(req)) || "{}");
+				const body = JSON.parse((await readBody(req, 64 * 1024 * 1024)) || "{}");
+				const { getSession } = await import("./dock.mjs");
 				res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-				res.write(`data: ${JSON.stringify({ type: "text_delta", delta: `(dock non collegato, vedi u3 — hai scritto: ${(body.message ?? "").slice(0, 80)})` })}\n\n`);
-				res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-				return res.end();
+				const say = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+				try {
+					const images = body.images ?? [];
+					if (images.length && !body.ocr && body.sensitive) {
+						say({ type: "text_delta", delta: "Nativa non mascherabile: attiva OCR per i documenti sensibili, poi riprova." });
+						say({ type: "done" });
+						return res.end();
+					}
+					let prompt = body.message ?? "";
+					const sdkImages = [];
+					for (const img of images) {
+						if (body.ocr) {
+							const dir = mkdtempSync(join(tmpdir(), "ocr-pi-dock-"));
+							const src = join(dir, String(img.name ?? "img.png").replace(/[^\w.\-]+/g, "_"));
+							writeFileSync(src, Buffer.from(img.dataBase64, "base64"));
+							const r = await daemon.convert({ path: src, engine: body.engine ?? "docling", pages: null, workdir: dir, deskew: !!body.deskew }, process.cwd());
+							prompt += `\n\n[OCR ${r.engine}: ${img.name}]\n${r.markdown}`;
+						} else {
+							sdkImages.push({ type: "image", source: { type: "base64", mediaType: "image/png", data: img.dataBase64 } });
+						}
+					}
+					const dockCli = async (args, extra = {}) => {
+						if (extra.markdown) {
+							// wiki_add via agent: ["add", wiki, file?, --titolo?] -> file da markdown
+							const dir = mkdtempSync(join(tmpdir(), "ocr-pi-dockadd-"));
+							const file = join(dir, "voce.md");
+							writeFileSync(file, extra.markdown);
+							const head = args.slice(0, 2);
+							return cli([...head, file, ...args.slice(2)]);
+						}
+						return cli(args);
+					};
+					const session = await getSession({
+						cli: dockCli,
+						daemonConvert: (a) => daemon.convert({ ...a, workdir: join(tmpdir(), "ocr-pi") }, process.cwd()),
+						jpiExtension: join(OCR_PI, "..", "extension", "j-pii.ts"),
+						model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free",
+					});
+					session.subscribe((event) => {
+						if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+							say({ type: "text_delta", delta: event.assistantMessageEvent.delta });
+						}
+						if (event.type === "tool_execution_start") say({ type: "tool", tool: event.toolName });
+					});
+					await session.prompt(prompt, sdkImages.length ? { images: sdkImages } : undefined);
+					say({ type: "done" });
+					return res.end();
+				} catch (err) {
+					say({ type: "text_delta", delta: `errore: ${err instanceof Error ? err.message : String(err)}` });
+					say({ type: "done" });
+					return res.end();
+				}
 			}
 
 			return send(res, 404, { error: "rotta sconosciuta" });

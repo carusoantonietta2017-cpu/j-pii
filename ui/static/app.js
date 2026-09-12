@@ -213,15 +213,30 @@ $("upick").addEventListener("change", async (e) => {
 })();
 
 // --- dock (echo fino a u3) ---
+$("dockform").insertAdjacentHTML("beforebegin", `<div style="display:flex;gap:12px;padding:0 12px 4px;font-size:13px">
+	<label><input type="checkbox" id="dockocr" checked> OCR immagini</label>
+	<label><input type="checkbox" id="docksens"> sensibili (mask)</label>
+	<label>allega <input type="file" id="dockimg" accept="image/*" aria-label="allega immagine"></label>
+</div>`);
 $("dockform").addEventListener("submit", async (e) => {
 	e.preventDefault();
 	const v = $("dockin").value.trim();
-	if (!v) return;
+	const f = $("dockimg").files[0];
+	if (!v && !f) return;
 	$("dock").classList.add("open");
 	$("docklog").insertAdjacentHTML("beforeend", `<div><b>tu:</b> ${esc(v)}</div>`);
 	$("dockin").value = "";
 	try {
-		const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: v }) });
+		let images = [];
+		if (f) {
+			const buf = await f.arrayBuffer();
+			let bin = "";
+			for (const b of new Uint8Array(buf)) bin += String.fromCharCode(b);
+			images = [{ name: f.name, dataBase64: btoa(bin) }];
+		}
+		const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ message: v, images, ocr: $("dockocr").checked, sensitive: $("docksens").checked }) });
+		$("dockimg").value = "";
 		const text = await r.text();
 		for (const line of text.split("\n")) {
 			if (!line.startsWith("data: ")) continue;
