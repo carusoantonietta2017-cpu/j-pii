@@ -125,7 +125,7 @@ python3 ocr-pi/preview.py --pdf scan.pdf --engine docling --wiki-root ~/wiki --s
 ```
 
 Originale e Markdown fianco a fianco, tabelle evidenziate, interruttore Mask,
-pulsanti Approva/Rimanda collegati alla wiki (`--serve 8000` per i pulsanti).
+review a tre stati (Draft/Reviewed/Versioned) collegata alla wiki (`--serve 8000` per i pulsanti).
 
 ### 5.5 Demone: la seconda conversione in secondi
 
@@ -137,15 +137,59 @@ sessione (misurato: 137 s → 0.7 s). Vive e muore con la sessione; log in
 
 ## 6. App web (PWA locale, anche da mobile)
 
+### 6.1 Avvio
+
 ```bash
+# dipendenze (una volta sola, vedi capitolo 2 punto 4)
+cd ui && npm install && cd ..
+
+# avvio base: wiki in ~/wiki, porta 8001
 PORT=8001 UI_WIKI_ROOT=~/wiki node ui/server.mjs
 # apri http://localhost:8001 — anche dal telefono in rete locale
+# (es. http://192.168.1.10:8001, stessa Wi-Fi)
 ```
 
-Sidebar Folder/Wiki/Cestino, split originale/convertito, review, menu
-esporta/importa/rinomina/nuova, converti-da-file, dock agente con immagini
-(OCR + sensibili come toggle). Modello dock via `UI_MODEL`.
+Variabili d'ambiente:
+
+| Variabile | Default | Cosa fa |
+|---|---|---|
+| `PORT` | `8000` | porta d'ascolto (`PORT=8002 …` se occupata) |
+| `UI_WIKI_ROOT` | `./wikis` | radice delle wiki e di `sources.json` |
+| `UI_PYTHON` | `ocr-pi/.venv/bin/python` | python del demone OCR (`python3` per provare col motore `fake`) |
+| `UI_MODEL` | `opencode/muse-spark-1.3-contributor-free` | modello del dock agente (mostrato nel badge in alto) |
+| `JPII_ANALYZER` | `real` | `fake` = dock senza pesi modello (maschera solo CF/email via regex) |
+| `JPII_PYTHON` | `python3` | interprete del sidecar j-pii (se manca e c'è `.venv/bin/python`, l'app lo usa da sola) |
+| `UI_CHAT_TIMEOUT_MS` | `180000` | timeout risposta dock (3 min): poi azzera e lo scrive in chat |
+
+Prova veloce senza modelli (motore `fake`): metti `UI_PYTHON=python3` e
+scegli `fake` nel selettore motore prima di convertire.
+
+### 6.2 Cosa trovi
+
+Topbar (ricerca globale con filtro stato, tema chiaro/scuro, Nuova wiki,
+Converti file), sidebar (cartelle sorgente con rimozione, wiki con stati,
+originali `raw/` cliccabili, Cestino totale), split originale/convertito (anteprima mask locale, opzioni
+motore/pagine/deskew, review a tre stati draft/reviewed/versioned, cestina
+voce, file wiki `index.md`/`SKILL.md`/`meta.json`), menu wiki (nuova voce,
+esporta completo/leggero, importa zip con merge, rinomina, vedi cestino,
+elimina wiki con conferma), dock agente (nuova conversazione, OCR +
+sensibili come toggle, motore/deskew, allegati multipli). Scorciatoia:
+`Ctrl/⌘+K` porta il cursore nella ricerca globale.
+
 V1 da browser (l'installazione PWA vuole HTTPS: più avanti).
+
+### 6.3 Screenshot (dal tour Playwright, `python3 scripts/verify-ui.py`)
+
+![Home: sidebar, breadcrumb, split e dock](docs/shots/01-home.png)
+![Ricerca globale di “iva”](docs/shots/02-search.png)
+![Cestino della wiki demo](docs/shots/03-trash.png)
+![Anteprima di conversione non salvata](docs/shots/04-convert.png)
+![Anteprima dell'originale da cartella sorgente](docs/shots/07-server-preview.png)
+![Originale cliccato: immagine + voce collegata](docs/shots/08-raw.png)
+![Dock: risposta accorpata in un solo fumetto](docs/shots/09-dock.png)
+![Prima wiki da radice vuota](docs/shots/10-empty.png)
+![Tema scuro](docs/shots/05-dark.png)
+![Mobile 390 px con sidebar a scomparsa](docs/shots/06-mobile.png)
 
 ---
 
@@ -158,6 +202,8 @@ V1 da browser (l'installazione PWA vuole HTTPS: più avanti).
 | `ocr-pi blocked ...` | Rispondi alle due domande e riprova |
 | `salto ... (non è un'immagine valida)` | Controlla il file (non è PNG/JPEG/… leggibile) |
 | Nativa non mascherabile (dock) | Attiva OCR per i sensibili, poi riprova |
+| Dock muto (scrivi e non risponde) | Sidecar j-pii non partito: riavvia con `JPII_ANALYZER=fake` per provare, o `JPII_PYTHON=<venv>/bin/python` col setup completo; l'app ora lo scrive in chat invece di tacere |
+| `Agent is already processing a prompt` | Un messaggio precedente era rimasto appeso: il server ora azzera e riprova da solo (vedi `[dock]` nel log). Se lo vedi spesso, alza `UI_CHAT_TIMEOUT_MS` o premi “Nuova conversazione” |
 | Troppe revisioni | `JPII_EXCLUDE_TAGS=DATE,TIME,BUILDINGNUM,AGE` |
 | `ModuleNotFoundError` | Usa il python del venv giusto |
 | Porta occupata | `PORT=8002 ...` (la 8000 la usa spesso il mock) |
@@ -222,10 +268,37 @@ Atteso zero `fail` + tsc silenzioso.
 cd ui && node --test server.test.mjs dock.test.mjs 2>&1 | grep -E "^# (tests|pass|fail)"
 ```
 
-Atteso zero `fail` (porta effimera, demone fake, niente LLM).
+Atteso `tests 20`, zero `fail`: statici + `dockform`, 404/traversal,
+create/add/search/review, errori JSON, sources, convert fake via demone (con
+asset inline), `convert-raw` da wiki, `GET /api/file` confinato a wiki e
+sorgenti, dettaglio/file/export/rename, convert-upload, `chat/new`, guard
+sensibile+nativa — più i nuovi `GET /api/config`, `GET /api/search`,
+`GET /api/wiki/:slug/trash` e il CSS (con check che `index.html` esponga
+`dockform`, `gsearch`, `dlg`, `toast`, `docknew`, `newwikibtn`, `themebtn`).
+Niente LLM, niente modelli.
+
+**Passo 6b — UI end-to-end con Playwright** (2 min, Chromium locale):
+
+```bash
+python3 scripts/verify-ui.py
+```
+
+Atteso `TUTTO OK — 25 passi`: il backend parte su porta effimera con
+`UI_PYTHON=python3` e `JPII_ANALYZER=fake`, semina una wiki `demo`, poi
+clicca davvero ogni funzione — voce, ricerca, mask + review a tre stati,
+nuova voce (+ validazione), sorgente invalida, cestino + vista, nuova wiki,
+rinomina, sorgenti, anteprima da sorgente (img + pdf), raw collegato e
+orfano (converti + salva), export + import merge, upload `fake` → salva,
+dock (chat con fumetto unico, OCR da allegato, guard sensibili), rimozione
+sorgente e wiki (conferma errata + giusta), tema dark persistente + `Ctrl+K`
++ mobile, radice vuota (prima wiki + voce), blocco j-pii con motivo specifico
+— con zero errori JS e zero API fallite oltre al 400 atteso della sorgente
+invalida. Screenshot in `/tmp/ui-shots/` (copiati in `docs/shots/` per il
+capitolo 6.3). Richiede solo `pip install playwright` + `playwright install
+chromium` (oppure il Chrome già in `~/.cache/ms-playwright`).
 
 **Passo 7 — dal vivo**: tour wiki (capitolo 5.2 su `/tmp/...`), MCP
 `--selftest` + demo, hook in pi con immagine vera (capitolo 5.1, 3 min di
 pazienza la prima volta), PWA su `PORT=8001`.
 
-Dettagli tecnici: `docs/research/`, `bench/corpus/`, `docs/agents/`, tracker GitHub.
+Dettagli tecnici: `docs/research/`, `bench/corpus/`, `docs/agents/`, `docs/plans/`, `docs/shots/`, `scripts/verify-ui.py`, tracker GitHub.

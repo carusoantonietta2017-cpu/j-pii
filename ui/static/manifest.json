@@ -4,7 +4,7 @@
   "description": "Converti documenti in Markdown e gestisci dizionari wiki. Tutto in locale.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#ffffff",
+  "background_color": "#f5f7fa",
+  "theme_color": "#4f46e5",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }

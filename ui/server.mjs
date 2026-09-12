@@ -1,7 +1,7 @@
 // Backend PWA ocr-pi (u1): statici + REST sopra demone/cli.py + SSE chat (echo fino a u3).
 // Zero dipendenze. Config: PORT, UI_WIKI_ROOT (default ./wikis), UI_PYTHON.
 import { execFile } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,6 +19,14 @@ export const config = {
 	wikiRoot: resolve(process.env.UI_WIKI_ROOT ?? join(process.cwd(), "wikis")),
 	python: process.env.UI_PYTHON ?? join(OCR_PI, ".venv", "bin", "python"),
 };
+
+// Il dock carica l'extension j-pii, che di default cerca il sidecar con un
+// python relativo (mai valido): se JPII_PYTHON manca e c'è il venv del repo,
+// usalo, così la chat funziona senza configurazione extra.
+if (!process.env.JPII_PYTHON) {
+	const venvPy = resolve(process.cwd(), ".venv", "bin", "python");
+	if (existsSync(venvPy)) process.env.JPII_PYTHON = venvPy;
+}
 
 const daemon = new Daemon();
 
@@ -97,11 +105,21 @@ async function listSourceFiles(dir) {
 
 const MIME = {
 	".html": "text/html; charset=utf-8",
-	".js": "text/javascript",
-	".css": "text/css",
+	".js": "text/javascript; charset=utf-8",
+	".css": "text/css; charset=utf-8",
 	".json": "application/json",
+	".md": "text/markdown; charset=utf-8",
+	".pdf": "application/pdf",
 	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".webp": "image/webp",
+	".gif": "image/gif",
+	".bmp": "image/bmp",
+	".tif": "image/tiff",
+	".tiff": "image/tiff",
 	".svg": "image/svg+xml",
+	".ico": "image/x-icon",
 	".webmanifest": "application/manifest+json",
 };
 
@@ -120,6 +138,15 @@ async function serveStatic(req, res, url) {
 	}
 }
 
+export function jpiBlockMessage(notes) {
+	const line = (notes || []).find((l) => l.includes("blocked a request")) || "";
+	const reason = line.includes("blocked a request:") ? line.split("blocked a request:")[1].trim() : "";
+	if (reason) {
+		return `Bloccata da j-pii prima del modello: ${reason}. Se sono falsi positivi (es. date o numeri dentro un nome file), riavvia con JPII_EXCLUDE_TAGS=DATE,TIME,BUILDINGNUM,AGE,ZIPCODE oppure riformula il messaggio senza quei valori. Dettagli nel log del server.`;
+	}
+	return "Nessuna risposta dall'agente: la richiesta è stata bloccata prima del modello (spesso è j-pii che non avvia il sidecar). Prova con JPII_ANALYZER=fake e JPII_PYTHON=<venv>/bin/python, poi premi “Nuova conversazione” e riprova.";
+}
+
 export function createApp() {
 	const server = createServer(async (req, res) => {
 		try {
@@ -131,6 +158,21 @@ export function createApp() {
 			// GET /api/wikis
 			if (req.method === "GET" && seg.join("/") === "api/wikis") {
 				return send(res, 200, await cli(["list"]));
+			}
+
+			// GET /api/config (modello dock + radici, per badge UI)
+			if (req.method === "GET" && url.pathname === "/api/config") {
+				return send(res, 200, { model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free" });
+			}
+
+			// GET /api/search?q=&stato=&wiki=  (ricerca globale sopra cli search)
+			if (req.method === "GET" && url.pathname === "/api/search") {
+				const args = ["search", url.searchParams.get("q") ?? ""];
+				const stato = url.searchParams.get("stato");
+				const wiki = url.searchParams.get("wiki");
+				if (stato) args.push("--stato", stato);
+				if (wiki) args.push("--wiki", wiki);
+				return send(res, 200, await cli(args));
 			}
 
 			// GET /api/wiki/:slug  (dettaglio: meta + cestino + originali)
@@ -171,6 +213,11 @@ export function createApp() {
 				}
 			}
 
+			// GET /api/wiki/:slug/trash  (voci cestinate, recuperabili a mano da trash/)
+			if (req.method === "GET" && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "trash") {
+				return send(res, 200, await cli(["trash", decodeURIComponent(seg[2])]));
+			}
+
 			// GET /api/wiki/:slug/export.zip[?senza_raw=1]  (download)
 			if (req.method === "GET" && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "export.zip") {
 				const slug = decodeURIComponent(seg[2]);
@@ -202,7 +249,16 @@ export function createApp() {
 					},
 					process.cwd(),
 				);
-				return send(res, 200, result);
+				// asset inline (stesso formato di /api/convert-upload) per l'anteprima nel browser
+				const assets = [];
+				for (const a of result.assets ?? []) {
+					try {
+						assets.push({ name: String(a).split("/").pop(), dataBase64: (await readFile(String(a))).toString("base64") });
+					} catch {
+						/* asset mancante: salta */
+					}
+				}
+				return send(res, 200, { ...result, assets });
 			}
 
 			const SOURCES = () => join(config.wikiRoot, "sources.json");
@@ -244,6 +300,52 @@ export function createApp() {
 					return send(res, 200, { removed: body.path });
 				}
 				return send(res, 404, { error: "rotta sconosciuta" });
+			}
+
+			// GET /api/file?path=<assoluto>  (anteprima originali: solo wikiRoot o cartelle sorgente)
+			if (req.method === "GET" && url.pathname === "/api/file") {
+				const raw = (url.searchParams.get("path") ?? "").replace(/\\/g, "/");
+				if (!raw) return send(res, 400, { error: "manca path" });
+				const file = normalize(raw);
+				const roots = [resolve(config.wikiRoot), ...(await readSources()).map((s) => normalize(resolve(String(s))))];
+				const inside = roots.some((r) => file === r || file.startsWith(r + sep));
+				if (raw.includes("..") || !inside) return send(res, 403, { error: "fuori dalle cartelle consentite" });
+				try {
+					if (!(await stat(file)).isFile()) return send(res, 404, { error: "non trovato" });
+				res.writeHead(200, { "Content-Type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream" });
+					return res.end(await readFile(file));
+				} catch {
+					return send(res, 404, { error: "non trovato" });
+				}
+			}
+
+			// POST /api/wiki/:slug/convert-raw {file, engine?, pages?, deskew?} (raw già in wiki)
+			if (req.method === "POST" && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "convert-raw") {
+				const slug = decodeURIComponent(seg[2]);
+				const body = JSON.parse((await readBody(req)) || "{}");
+				const base = String(body.file ?? "").replace(/\\/g, "/");
+				if (!base || base.includes("/") || base.includes("..")) return send(res, 400, { error: "file raw non valido" });
+				const dir = join(config.wikiRoot, "wiki", slug);
+				const src = normalize(join(dir, "raw", base));
+				if (src !== join(dir, "raw", base) || !src.startsWith(dir + sep)) return send(res, 403, { error: "fuori dalla wiki" });
+				try {
+					if (!(await stat(src)).isFile()) return send(res, 404, { error: "originale assente" });
+				} catch {
+					return send(res, 404, { error: "originale assente" });
+				}
+				const result = await daemon.convert(
+					{ path: src, engine: body.engine ?? "docling", pages: body.pages ?? null, workdir: join(tmpdir(), "ocr-pi"), deskew: !!body.deskew },
+					process.cwd(),
+				);
+				const assets = [];
+				for (const a of result.assets ?? []) {
+					try {
+						assets.push({ name: String(a).split("/").pop(), dataBase64: (await readFile(String(a))).toString("base64") });
+					} catch {
+						/* asset mancante: salta */
+					}
+				}
+				return send(res, 200, { ...result, assets });
 			}
 
 			// POST /api/wiki {slug}  (nuova wiki)
@@ -336,9 +438,14 @@ export function createApp() {
 			// POST /api/chat {message, images?[{name,dataBase64}], ocr?, sensitive?}  (SSE dock)
 			if (req.method === "POST" && url.pathname === "/api/chat") {
 				const body = JSON.parse((await readBody(req, 64 * 1024 * 1024)) || "{}");
-				const { getSession } = await import("./dock.mjs");
+				const { getSession, resetSession } = await import("./dock.mjs");
 				res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
 				const say = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+				if (!(body.message ?? "").trim() && !(body.images ?? []).length) {
+					say({ type: "text_delta", delta: "Scrivimi una domanda o allega un file, poi riprova." });
+					say({ type: "done" });
+					return res.end();
+				}
 				try {
 					const images = body.images ?? [];
 					if (images.length && !body.ocr && body.sensitive) {
@@ -353,7 +460,7 @@ export function createApp() {
 							const dir = mkdtempSync(join(tmpdir(), "ocr-pi-dock-"));
 							const src = join(dir, String(img.name ?? "img.png").replace(/[^\w.\-]+/g, "_"));
 							writeFileSync(src, Buffer.from(img.dataBase64, "base64"));
-							const r = await daemon.convert({ path: src, engine: body.engine ?? "docling", pages: null, workdir: dir, deskew: !!body.deskew }, process.cwd());
+							const r = await daemon.convert({ path: src, engine: body.engine ?? "docling", pages: body.pages ?? null, workdir: dir, deskew: !!body.deskew }, process.cwd());
 							prompt += `\n\n[OCR ${r.engine}: ${img.name}]\n${r.markdown}`;
 						} else {
 							sdkImages.push({ type: "image", source: { type: "base64", mediaType: "image/png", data: img.dataBase64 } });
@@ -370,19 +477,71 @@ export function createApp() {
 						}
 						return cli(args);
 					};
-					const session = await getSession({
+					const sessionOpts = {
 						cli: dockCli,
 						daemonConvert: (a) => daemon.convert({ ...a, workdir: join(tmpdir(), "ocr-pi") }, process.cwd()),
 						jpiExtension: join(OCR_PI, "..", "extension", "j-pii.ts"),
 						model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free",
-					});
-					session.subscribe((event) => {
-						if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-							say({ type: "text_delta", delta: event.assistantMessageEvent.delta });
+					};
+					const timeoutMs = Number(process.env.UI_CHAT_TIMEOUT_MS ?? 180000);
+					const jpiNotes = [];
+					const origConsoleError = console.error;
+					const runOnce = async () => {
+						const session = await getSession(sessionOpts);
+						let innerGot = false;
+						session.subscribe((event) => {
+							if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+								innerGot = true;
+								say({ type: "text_delta", delta: event.assistantMessageEvent.delta });
+							}
+							if (event.type === "tool_execution_start") {
+								innerGot = true;
+								say({ type: "tool", tool: event.toolName });
+							}
+						});
+						let timer;
+						console.error = (...a) => {
+							try {
+								const line = a.map((x) => String(x)).join(" ");
+								if (line.includes("[j-pii]")) jpiNotes.push(line);
+							} catch {}
+							origConsoleError(...a);
+						};
+						try {
+							await Promise.race([
+								session.prompt(prompt, sdkImages.length ? { images: sdkImages } : undefined),
+								new Promise((_, reject) => {
+									timer = setTimeout(() => reject(Object.assign(new Error("timeout"), { code: "CHAT_TIMEOUT" })), timeoutMs);
+								}),
+							]);
+						} finally {
+							clearTimeout(timer);
+							console.error = origConsoleError;
 						}
-						if (event.type === "tool_execution_start") say({ type: "tool", tool: event.toolName });
-					});
-					await session.prompt(prompt, sdkImages.length ? { images: sdkImages } : undefined);
+						return innerGot;
+					};
+					let gotContent;
+					try {
+						gotContent = await runOnce();
+					} catch (err) {
+						if (err && err.code === "CHAT_TIMEOUT") {
+							resetSession();
+							console.error("[dock] prompt senza risposta dopo " + timeoutMs + " ms: sessione azzerata");
+							say({ type: "text_delta", delta: "Nessuna risposta entro " + Math.round(timeoutMs / 1000) + " secondi: ho azzerato la conversazione. Riprova con un messaggio semplice; se persiste, prova JPII_ANALYZER=fake o un altro modello via UI_MODEL." });
+							say({ type: "done" });
+							return res.end();
+						}
+						if (/already processing/i.test((err && err.message) || "")) {
+							resetSession();
+							console.error("[dock] sessione incastrata, riprovo da zero");
+							gotContent = await runOnce();
+						} else {
+							throw err;
+						}
+					}
+					if (!gotContent) {
+						say({ type: "text_delta", delta: jpiBlockMessage(jpiNotes) });
+					}
 					say({ type: "done" });
 					return res.end();
 				} catch (err) {

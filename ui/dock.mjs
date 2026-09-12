@@ -41,6 +41,18 @@ let sessionPromise = null;
 export async function getSession({ cli, daemonConvert, jpiExtension, model: modelRef }) {
 	if (sessionPromise) return sessionPromise;
 	sessionPromise = (async () => {
+		try {
+			return await createSession({ cli, daemonConvert, jpiExtension, modelRef });
+		} catch (err) {
+			// mai avvelenare la cache: il prossimo messaggio riprova da zero
+			sessionPromise = null;
+			throw err;
+		}
+	})();
+	return sessionPromise;
+}
+
+async function createSession({ cli, daemonConvert, jpiExtension, modelRef }) {
 		const pi = await import("@earendil-works/pi-coding-agent");
 		const { DefaultResourceLoader, SessionManager, createAgentSession, getAgentDir, ModelRuntime } = pi;
 		const { Type } = await import("typebox");
@@ -93,8 +105,6 @@ export async function getSession({ cli, daemonConvert, jpiExtension, model: mode
 			resourceLoader: loader,
 		});
 		return session;
-	})();
-	return sessionPromise;
 }
 
 export function resetSession() {

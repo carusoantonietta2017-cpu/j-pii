@@ -85,6 +85,51 @@ test("convert fake via demone", async () => {
 	assert.equal(r.status, 200);
 	assert.ok(r.body.markdown.includes("|"));
 	assert.equal(r.body.engine, "fake");
+	assert.ok(Array.isArray(r.body.assets));
+});
+
+test("convert-raw da wiki: ok, assente e traversal bloccati", async () => {
+	const fs = await import("node:fs");
+	await j("/api/wiki", { method: "POST", body: JSON.stringify({ slug: "rawtest" }) });
+	const rawdir = join(process.env.UI_WIKI_ROOT, "wiki", "rawtest", "raw");
+	fs.mkdirSync(rawdir, { recursive: true });
+	fs.writeFileSync(join(rawdir, "foto.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"));
+	const ok = await j("/api/wiki/rawtest/convert-raw", { method: "POST", body: JSON.stringify({ file: "foto.png", engine: "fake" }) });
+	assert.equal(ok.status, 200);
+	assert.ok(ok.body.markdown.includes("|"));
+	assert.ok(Array.isArray(ok.body.assets));
+	const miss = await j("/api/wiki/rawtest/convert-raw", { method: "POST", body: JSON.stringify({ file: "niente.png", engine: "fake" }) });
+	assert.equal(miss.status, 404);
+	const trav = await j("/api/wiki/rawtest/convert-raw", { method: "POST", body: JSON.stringify({ file: "../meta.json", engine: "fake" }) });
+	assert.equal(trav.status, 400);
+	const nowiki = await j("/api/wiki/nonexistent/convert-raw", { method: "POST", body: JSON.stringify({ file: "x.png", engine: "fake" }) });
+	assert.equal(nowiki.status, 404);
+});
+
+test("api/file: anteprima confinata a wikiRoot e sorgenti", async () => {
+	const fs = await import("node:fs");
+	// dentro wikiRoot: servito
+	const inside = join(process.env.UI_WIKI_ROOT, "dentro.png");
+	fs.writeFileSync(inside, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"));
+	const ok = await fetch(base + "/api/file?path=" + encodeURIComponent(inside));
+	assert.equal(ok.status, 200);
+	assert.ok((ok.headers.get("content-type") ?? "").includes("image/png"));
+	// fuori dalle radici: bloccato
+	const out = await fetch(base + "/api/file?path=" + encodeURIComponent("/etc/hostname"));
+	assert.equal(out.status, 403);
+	// traversal: bloccato
+	const trav = await fetch(base + "/api/file?path=" + encodeURIComponent(join(process.env.UI_WIKI_ROOT, "..", "x")));
+	assert.equal(trav.status, 403);
+	// sorgente registrata: servita; dopo rimozione: bloccata (dir fuori da wikiRoot)
+	const srcdir = mkdtempSync(join(tmpdir(), "ocr-pi-src-"));
+	fs.mkdirSync(srcdir, { recursive: true });
+	fs.writeFileSync(srcdir + "/s.png", "png");
+	await j("/api/sources", { method: "POST", body: JSON.stringify({ path: srcdir }) });
+	const s1 = await fetch(base + "/api/file?path=" + encodeURIComponent(srcdir + "/s.png"));
+	assert.equal(s1.status, 200);
+	await j("/api/sources", { method: "DELETE", body: JSON.stringify({ path: srcdir }) });
+	const s2 = await fetch(base + "/api/file?path=" + encodeURIComponent(srcdir + "/s.png"));
+	assert.equal(s2.status, 403);
 });
 
 test("dettaglio wiki, file confinato, export.zip, rename", async () => {
@@ -121,9 +166,44 @@ test("convert-upload fake + add con assets", async () => {
 	assert.equal(add.body.review, "draft");
 });
 
+test("config, ricerca globale, trash e statici css", async () => {
+	const cfg = await j("/api/config");
+	assert.equal(cfg.status, 200);
+	assert.ok(typeof cfg.body.model === "string" && cfg.body.model.length > 0);
+	const gs = await j("/api/search?q=iva");
+	assert.equal(gs.status, 200);
+	assert.ok(Array.isArray(gs.body) && gs.body.length >= 1);
+	const gsDraft = await j("/api/search?q=iva&stato=reviewed");
+	assert.equal(gsDraft.status, 200);
+	const tr = await j("/api/wiki/demo-nuova/trash");
+	assert.equal(tr.status, 200);
+	assert.ok(Array.isArray(tr.body));
+	const css = await fetch(base + "/styles.css");
+	assert.equal(css.status, 200);
+	assert.ok((css.headers.get("content-type") ?? "").includes("css"));
+	const html = await (await fetch(base + "/")).text();
+	for (const id of ["dockform", "gsearch", "dlg", "toast", "docknew", "newwikibtn", "themebtn"]) {
+		assert.ok(html.includes(`id="${id}"`), `manca #${id} in index.html`);
+	}
+});
+
 test("chat/new resetta la conversazione", async () => {
 	const r = await j("/api/chat/new", { method: "POST", body: "{}" });
 	assert.equal(r.body.reset, true);
+});
+
+test("chat con modello inesistente risponde errore, mai muta", async () => {
+	process.env.UI_MODEL = "nope/nonexistent-xyz";
+	try {
+		const r = await fetch(base + "/api/chat", { method: "POST",
+			body: JSON.stringify({ message: "ciao" }) });
+		const text = await r.text();
+		assert.ok(text.includes("done"), "manca done");
+		assert.ok(/errore|modello/i.test(text), "nessun errore esplicito");
+	} finally {
+		delete process.env.UI_MODEL;
+		await j("/api/chat/new", { method: "POST", body: "{}" });
+	}
 });
 
 test("chat sensibile+nativa rifiutata senza LLM", async () => {
