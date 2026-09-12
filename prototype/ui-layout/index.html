@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ocr-pi app — mock layout (throwaway)</title>
+<style>
+  :root { --bd: #dadce0; --acc: #137333; --hl: #fff3b0; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100dvh; }
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--bd); }
+  #burger { display: none; font-size: 20px; border: 1px solid var(--bd); background: #fff; border-radius: 8px; padding: 4px 10px; }
+  #work { display: flex; flex: 1; min-height: 0; }
+  aside { width: 230px; border-right: 1px solid var(--bd); overflow: auto; padding: 8px; background: #fafafa; }
+  aside h2 { font-size: 12px; text-transform: uppercase; color: #5f6368; margin: 8px 4px 4px; }
+  aside ul { list-style: none; margin: 0 0 8px; padding: 0; }
+  aside li { padding: 6px 8px; border-radius: 6px; font-size: 14px; }
+  aside li.sel { background: #e8f0fe; }
+  aside li.sub { padding-left: 22px; color: #444; }
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-width: 0; }
+  .pane { padding: 10px 14px; overflow: auto; }
+  .pane.left { border-right: 1px solid var(--bd); background: #fff; }
+  .tabs { display: none; gap: 8px; padding: 8px 12px 0; }
+  .tabs button { flex: 1; padding: 10px; border: 1px solid var(--bd); background: #fff; border-radius: 8px; font-size: 15px; }
+  .tabs button[aria-pressed="true"] { background: #e8f0fe; border-color: #8ab4f8; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { border: 1px solid #80868b; padding: 4px 8px; }
+  table.hl td, table.hl th { background: var(--hl); }
+  .toolbar { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  .toolbar button, #dock form button { border: 1px solid var(--bd); background: #fff; border-radius: 8px; padding: 8px 14px; font-size: 15px; }
+  button.primary { background: var(--acc); color: #fff; border-color: var(--acc); }
+  #dock { border-top: 1px solid var(--bd); background: #f8f9fa; }
+  #docklog { max-height: 110px; overflow: auto; padding: 8px 12px; font-size: 14px; display: none; }
+  #dock.open #docklog { display: block; }
+  #dock form { display: flex; gap: 8px; padding: 8px 12px; }
+  #dock input { flex: 1; padding: 10px; font-size: 15px; border: 1px solid var(--bd); border-radius: 8px; }
+  #docktoggle { width: 100%; border: 0; background: none; padding: 6px; font-size: 13px; color: #5f6368; display: none; }
+  .q { background: #fef7e0; border-bottom: 1px solid #fde293; padding: 6px 12px; font-size: 13px; }
+  @media (max-width: 800px) {
+    #burger { display: block; }
+    aside { position: fixed; z-index: 10; top: 0; bottom: 0; left: 0; background: #fff; transform: translateX(-105%); transition: transform .2s; width: min(78vw, 300px); box-shadow: 2px 0 8px rgba(0,0,0,.15); }
+    body.nav aside { transform: none; }
+    main { grid-template-columns: 1fr; }
+    .pane.left { border-right: 0; }
+    .tabs { display: flex; }
+    main[data-tab="md"] .pane.left, main[data-tab="pdf"] .pane.right { display: none; }
+    #docktoggle { display: block; }
+    #docklog, #dock form { display: none; }
+    #dock.open #docklog, #dock.open form { display: block; }
+  }
+</style>
+</head>
+<body>
+<header><button id="burger" aria-label="menu">☰</button><strong>ocr-pi</strong><span style="color:#5f6368;font-size:13px">mock throwaway — dati finti</span></header>
+<div class="q">Demo: sidebar Folder/Wiki · split originale/convertito · dock agente. Su mobile (&lt;800px): drawer, tab, dock a foglio. Reagisci alle domande nel README.</div>
+<div id="work">
+  <aside id="side">
+    <h2>Folder</h2>
+    <ul>
+      <li><b>Banca</b></li><li class="sub sel">aaa00.pdf</li><li class="sub">bbb01.pdf</li>
+      <li><b>Scontrini</b></li><li class="sub">scansione.pdf</li>
+      <li><b>Fatture</b></li>
+    </ul>
+    <h2>Wiki</h2>
+    <ul>
+      <li><b>Banca</b></li><li class="sub">aaa00.md <span title="verificato">✓</span></li><li class="sub">bbb01.md</li>
+      <li><b>Scontrini</b></li><li class="sub">scansione.md</li>
+      <li><b>Fatture</b></li>
+    </ul>
+  </aside>
+  <main id="split" data-tab="pdf">
+    <div class="tabs" role="tablist">
+      <button id="tPdf" aria-pressed="true">Originale</button>
+      <button id="tMd" aria-pressed="false">Convertito</button>
+    </div>
+    <section class="pane left">
+      <h2>aaa00.pdf</h2>
+      <svg viewBox="0 0 400 200" width="100%" role="img" aria-label="estratto conto simulato">
+        <rect x="8" y="8" width="384" height="184" fill="#fff" stroke="#80868b"/>
+        <text x="18" y="34" font-size="14" font-weight="bold">Estratto conto — Banca (demo)</text>
+        <g font-size="12">
+          <rect x="18" y="48" width="364" height="24" fill="#f1f3f4" stroke="#80868b"/>
+          <text x="26" y="65">Data | Causale | Importo</text>
+          <rect x="18" y="72" width="364" height="24" fill="#fff" stroke="#80868b"/>
+          <text x="26" y="89">03/08 | Bonifico stipendio | +1.800,00</text>
+          <rect x="18" y="96" width="364" height="24" fill="#fff" stroke="#80868b"/>
+          <text x="26" y="113">05/08 | Bolletta luce | -85,40</text>
+        </g>
+      </svg>
+      <p style="color:#5f6368;font-size:13px"><code>raw/aaa00.pdf</code> · pagina 1 di 2</p>
+    </section>
+    <section class="pane right">
+      <h2>aaa00.md <span style="font-size:12px;color:#5f6368">draft</span></h2>
+      <div class="toolbar">
+        <button class="primary" data-r="reviewed">Approva</button>
+        <button data-r="draft">Rimanda a draft</button>
+        <button id="bHl" aria-pressed="true">Evidenzia tabelle</button>
+      </div>
+      <p><code>![movimenti](assets/aaa00_p1.png)</code></p>
+      <table id="t" class="hl">
+        <tr><th>Data</th><th>Causale</th><th>Importo</th></tr>
+        <tr><td>03/08</td><td>Bonifico stipendio</td><td>+1.800,00</td></tr>
+        <tr><td>05/08</td><td>Bolletta luce</td><td>-85,40</td></tr>
+      </table>
+      <p id="toast" role="status" style="color:#137333"></p>
+    </section>
+  </main>
+</div>
+<section id="dock">
+  <button id="docktoggle">▲ agente pi</button>
+  <div id="docklog"><div><b>pi:</b> ciao! Chiedimi ad es. <i>crea una wiki con il file @aaa00.pdf</i> (demo: rispondo finto)</div></div>
+  <form id="dockform"><input id="dockin" placeholder='crea una wiki con il file @aaa00.pdf' aria-label="comando per l'agente"><button class="primary">Invia</button></form>
+</section>
+<script>
+  const $ = id => document.getElementById(id);
+  $('burger').onclick = () => document.body.classList.toggle('nav');
+  const split = $('split');
+  $('tPdf').onclick = () => { split.dataset.tab = 'pdf'; $('tPdf').setAttribute('aria-pressed','true'); $('tMd').setAttribute('aria-pressed','false'); };
+  $('tMd').onclick = () => { split.dataset.tab = 'md'; $('tMd').setAttribute('aria-pressed','true'); $('tPdf').setAttribute('aria-pressed','false'); };
+  $('docktoggle').onclick = () => $('dock').classList.toggle('open');
+  $('bHl').onclick = e => { const b = e.currentTarget; const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', on); $('t').classList.toggle('hl', on); };
+  document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { $('toast').textContent = 'stato voce: ' + b.dataset.r + ' (demo)'; });
+  document.querySelectorAll('#side li.sub').forEach(li => li.onclick = () => {
+    document.querySelectorAll('#side li').forEach(x => x.classList.remove('sel')); li.classList.add('sel');
+    document.body.classList.remove('nav');
+  });
+  $('dockform').onsubmit = e => {
+    e.preventDefault();
+    const v = $('dockin').value.trim() || 'crea una wiki con il file @aaa00.pdf';
+    $('dock').classList.add('open');
+    $('docklog').insertAdjacentHTML('beforeend', `<div><b>tu:</b> ${v.replace(/</g,'&lt;')}</div><div><b>pi:</b> fatto (demo): wiki <i>banca</i> con 1 voce draft da @aaa00.pdf</div>`);
+    $('dockin').value = '';
+  };
+</script>
+</body>
+</html>
