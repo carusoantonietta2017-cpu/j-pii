@@ -5,6 +5,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { maskTextForOcr } from "./j-pii.ts";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -64,6 +65,23 @@ export function __resetSession(): void {
 	sensitive = false;
 }
 
+const IMG_SUFFIX = /\.(png|jpe?g|tiff?|webp|gif|bmp)$/i;
+
+/** Percorsi immagine citati nel testo (tag <file name="..."> di pi, @path, path nudi). */
+export function imagePathsFromPrompt(prompt: string): string[] {
+	const found: string[] = [];
+	const push = (raw: string) => {
+		const clean = raw.replace(/^@/, "").replace(/^"|"$/g, "");
+		if (!IMG_SUFFIX.test(clean)) return;
+		try {
+			if (existsSync(clean) && statSync(clean).isFile() && !found.includes(clean)) found.push(clean);
+		} catch { /* path non locale: ignora */ }
+	};
+	for (const m of prompt.matchAll(/<file\s+name="([^"]+)">/g)) push(m[1]);
+	for (const m of prompt.matchAll(/(?:^|\s)(@?\/[\w\-.\/]+\.(?:png|jpe?g|tiff?|webp|gif|bmp))/gi)) push(m[1]);
+	return found;
+}
+
 const MIME_SUFFIX: Record<string, string> = {
 	"image/png": ".png",
 	"image/jpeg": ".jpg",
@@ -99,7 +117,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		const images = (event.images ?? []) as Array<{ data: string; mimeType: string }>;
-		if (images.length === 0) return undefined;
+		const cited = imagePathsFromPrompt(event.prompt ?? "");
+		if (images.length === 0 && cited.length === 0) return undefined;
 		if (!asked) {
 		if (!ctx.hasUI) failClosed("immagini allegate ma nessuna UI per le domande");
 
@@ -122,9 +141,12 @@ export default function (pi: ExtensionAPI) {
 			return undefined;
 		}
 
+		const sources: string[] = [];
+		for (const c of cited) sources.push(c);
+		for (const img of images) sources.push(await imageToTmpFile(img));
 		const parts: string[] = [];
-		for (let i = 0; i < images.length; i++) {
-			const path = await imageToTmpFile(images[i]);
+		for (let i = 0; i < sources.length; i++) {
+			const path = sources[i];
 			const r = await runner(path, ctx.cwd);
 			let md = r.markdown;
 			if (sensitive) {

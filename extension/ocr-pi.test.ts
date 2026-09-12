@@ -2,7 +2,7 @@
 // Runner finto iniettato; analyzer fake (niente modello).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import ocrPi, { __resetSession, __setRunner } from "./ocr-pi.ts";
+import ocrPi, { __resetSession, __setRunner, imagePathsFromPrompt } from "./ocr-pi.ts";
 
 process.env.JPII_ANALYZER = "fake";
 
@@ -113,4 +113,27 @@ test("session_start azzera il remember", async () => {
 	const out = await pi.handlers["before_agent_start"]({ prompt: "y", images: [IMG] }, ctx);
 	assert.equal(asked.length, 4);
 	assert.equal(out, undefined);
+});
+
+test("percorsi immagine nel testo: tag <file>, @path, scarta inesistenti", () => {
+	const got = imagePathsFromPrompt(
+		'<file name="/tmp/fattura-demo.png"></file> vedi @/tmp/fattura-demo.png e /tmp/inesistente.png e nota.txt',
+	);
+	assert.deepEqual(got, ["/tmp/fattura-demo.png"]);
+});
+
+test("path citato senza allegati: chiede e converte il file vero", async () => {
+	let converted = "";
+	const { pi, ctx, asked } = setup(["Sì, converti in locale", "No"]);
+	__setRunner(async (p: string) => {
+		converted = p;
+		return { markdown: "tabella vera", assets: [], pages: 1, engine: "fake", seconds: 0.1 };
+	});
+	const out = (await pi.handlers["before_agent_start"](
+		{ prompt: '<file name="/tmp/fattura-demo.png"></file> cosa contiene?', images: [] },
+		ctx,
+	)) as { message: { content: string } };
+	assert.equal(asked.length, 2);
+	assert.equal(converted, "/tmp/fattura-demo.png");
+	assert.ok(out.message.content.includes("tabella vera"));
 });
