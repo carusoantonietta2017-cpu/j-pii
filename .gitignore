@@ -55,3 +55,4 @@ Thumbs.db
 # ── bench corpus: binari scaricati/generati, solo script+manifest versionati ──
 bench/corpus/native/
 bench/corpus/derived/
+bench/report/
