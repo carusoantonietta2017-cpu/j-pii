@@ -62,9 +62,10 @@ class WriteWikiTest(unittest.TestCase):
         md = (wiki / "doc" / "fattura-001.md").read_text(encoding="utf-8")
         self.assertIn("](assets/x.png)", md)
 
-    def test_vuota_sollevata(self):
-        with self.assertRaises(ValueError):
-            write_wiki([], "demo", root=self.root)
+    def test_vuota_crea_wiki_in_allestimento(self):
+        wiki = write_wiki([], "demo", root=self.root)
+        self.assertTrue((wiki / "SKILL.md").exists())
+        check_skill_frontmatter((wiki / "SKILL.md").read_text(encoding="utf-8"))
 
 
 class ExportTest(unittest.TestCase):

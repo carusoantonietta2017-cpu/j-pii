@@ -74,7 +74,7 @@ def write_wiki(docs, slug, root=".", include_raw=True) -> Path:
     """Scrive wiki/<slug>/, ritorna il path. Voci sempre draft iniziale."""
     slug = slugify(slug)
     if not docs:
-        raise ValueError("niente documenti da scrivere")
+        docs = []
     wiki = Path(root) / "wiki" / slug
     doc_dir = wiki / "doc"
     assets_dir = doc_dir / "assets"
@@ -102,7 +102,7 @@ def write_wiki(docs, slug, root=".", include_raw=True) -> Path:
                           "pages": doc.pages, "engine": doc.engine,
                           "seconds": round(doc.seconds, 2), "review": "draft"})
 
-    titles = ", ".join(d.name for d in docs)
+    titles = ", ".join(d.name for d in docs) if docs else "in allestimento"
     skill_md = (
         f"---\nname: {skill_name_for(slug)}\n"
         f"description: Documenti trascritti ({titles}). Usala quando servono contenuti, "
@@ -114,7 +114,7 @@ def write_wiki(docs, slug, root=".", include_raw=True) -> Path:
     check_skill_frontmatter(skill_md)  # mai scrivere una SKILL.md invalida
     (wiki / "SKILL.md").write_text(skill_md, encoding="utf-8")
     (wiki / "README.md").write_text(
-        f"# Wiki {slug}\n\nVoci: {len(docs)}. Engine: {docs[0].engine}. "
+        f"# Wiki {slug}\n\nVoci: {len(docs)}. Engine: {docs[0].engine if docs else '?'}. "
         f"Stati in `index.md`. Export: `{slug}.zip`.\n", encoding="utf-8")
     (wiki / "AGENTS.md").write_text(
         f"# Note operative ({slug})\n\nSorgenti in `raw/`, trascrizioni corrette in "

@@ -40,6 +40,17 @@ class ManagerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             manager.review(self.root, "s", "Fattura", "bozza")
 
+    def test_add_crea_wiki_se_assente(self):
+        md = self.root / "n.md"
+        md.write_text("# N\n")
+        e = manager.add(self.root, "nuova", md, title="Nota")
+        self.assertEqual(e["review"], "draft")
+        self.assertIn({"slug": "nuova", "voci": 1}, manager.list_wikis(self.root))
+
+    def test_create_wiki_vuota(self):
+        manager.create_wiki(self.root, "vuota")
+        self.assertIn({"slug": "vuota", "voci": 0}, manager.list_wikis(self.root))
+
     def test_add_draft_e_duplicato(self):
         md = self.root / "n.md"
         md.write_text("# N\ntesto nuovo\n")

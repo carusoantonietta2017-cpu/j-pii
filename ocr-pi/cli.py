@@ -2,7 +2,7 @@
 """Wiki-manager CLI. Solo stdlib.
 
 Uso: python3 ocr-pi/cli.py [--root DIR] <comando> ...
-  list | search Q [--stato S] [--wiki W] | show W VOCE | add W FILE.md [--titolo T]
+  list | create WIKI | search Q [--stato S] [--wiki W] | show W VOCE | add W FILE.md [--titolo T]
   review W VOCE {draft,reviewed,versioned} | remove W [VOCE] [--confirm]
   export W [--senza-raw] | import FILE.zip [--merge]
 """
@@ -14,6 +14,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import manager  # noqa: E402
+
+
+def cmd_create(a):
+    print(manager.create_wiki(a.root, a.wiki))
 
 
 def cmd_list(a):
@@ -54,6 +58,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="wiki")
     ap.add_argument("--root", default=".")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("create"); p.add_argument("wiki"); p.set_defaults(f=cmd_create)
     sub.add_parser("list").set_defaults(f=cmd_list)
     p = sub.add_parser("search"); p.add_argument("query")
     p.add_argument("--stato", default=None); p.add_argument("--wiki", default=None)

@@ -90,12 +90,20 @@ def show(root, wiki: str, voce: str) -> Path:
     raise LookupError(f"voce assente: {voce}")
 
 
+def create_wiki(root, slug: str):
+    """Crea wiki vuota (da popolare con add)."""
+    return write_wiki([], slug, root=root)
+
+
 def add(root, wiki: str, source_md, title=None) -> dict:
-    """Aggiunge un md esistente come voce draft. Ritorna la voce."""
+    """Aggiunge un md come voce draft; crea la wiki se assente."""
     src = Path(source_md)
     if not src.exists():
         raise FileNotFoundError(f"sorgente assente: {src}")
-    d = _require_wiki(root, wiki)
+    try:
+        d = _require_wiki(root, wiki)
+    except LookupError:
+        d = create_wiki(root, wiki)
     meta = _load_meta(d)
     name = title or src.stem
     vfile = f"doc/{slugify(name)}.md"
