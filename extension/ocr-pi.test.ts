@@ -2,12 +2,16 @@
 // Runner finto iniettato; analyzer fake (niente modello).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import ocrPi, { Daemon, __resetSession, __setRunner, imagePathsFromPrompt } from "./ocr-pi.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+process.env.TMPDIR = mkdtempSync(join(tmpdir(), "ocr-pi-test-"));
+import ocrPi, { Daemon, __resetSession, __setRunner, imagePathsFromPrompt, sniffImage } from "./ocr-pi.ts";
 
 process.env.JPII_ANALYZER = "fake";
 
 const CF = "RSSMRA80A01H501U";
-const IMG = { type: "image", data: Buffer.from("finto").toString("base64"), mimeType: "image/png" };
+const IMG = { type: "image", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", mimeType: "image/png" };
 
 function fakePi() {
 	const handlers: Record<string, any> = {};
@@ -159,4 +163,26 @@ test("Daemon: ping+convert veri contro daemon.py (fake engine)", async () => {
 	} finally {
 		d.stop();
 	}
+});
+
+test("sniff: png/jpg ok, testo no", () => {
+	assert.equal(sniffImage(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0])), ".png");
+	assert.equal(sniffImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), ".jpg");
+	assert.equal(sniffImage(Buffer.from("finto")), undefined);
+});
+
+test("file non valido citato: saltato con warning, niente conversione", async () => {
+	const { writeFileSync } = await import("node:fs");
+	const bad = join(process.env.TMPDIR as string, "x.png");
+	writeFileSync(bad, "finto");
+	let ran = false;
+	const { pi, ctx, notices } = setup(["Sì, converti in locale", "No"]);
+	__setRunner(async () => {
+		ran = true;
+		return { markdown: "x", assets: [], pages: 1, engine: "fake", seconds: 0 };
+	});
+	const out = await pi.handlers["before_agent_start"]({ prompt: `vedi ${bad}`, images: [] }, ctx);
+	assert.equal(ran, false);
+	assert.equal(out, undefined);
+	assert.ok(notices.some((n) => n.includes("non è un'immagine valida") || n.includes("nessuna immagine valida")));
 });

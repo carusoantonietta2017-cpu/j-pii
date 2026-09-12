@@ -5,10 +5,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { maskTextForOcr } from "./j-pii.ts";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, openSync, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -39,9 +39,11 @@ export class Daemon {
 	private buf = "";
 
 	private spawn(cwd: string): void {
+		const logFile = join(tmpdir(), "ocr-pi-daemon.log");
+		const logFd = openSync(logFile, "a");
 		this.proc = spawn(findPython(), [join(EXT_DIR, "..", "ocr-pi", "daemon.py")], {
 			cwd,
-			stdio: ["pipe", "pipe", "inherit"],
+			stdio: ["pipe", "pipe", logFd],
 		});
 		this.proc.stdout?.on("data", (chunk: Buffer) => this.onData(chunk));
 		this.proc.on("exit", () => {
@@ -154,6 +156,20 @@ export function __resetSession(): void {
 
 const IMG_SUFFIX = /\.(png|jpe?g|tiff?|webp|gif|bmp)$/i;
 
+/** Vero file immagine esistente con firma valida (per i path citati). */
+export function isValidImageFile(path: string): boolean {
+	try {
+		if (!statSync(path).isFile()) return false;
+	} catch {
+		return false;
+	}
+	try {
+		return sniffImage(readFileSync(path).subarray(0, 16)) !== undefined;
+	} catch {
+		return false;
+	}
+}
+
 /** Percorsi immagine citati nel testo (tag <file name="..."> di pi, @path, path nudi). */
 export function imagePathsFromPrompt(prompt: string): string[] {
 	const found: string[] = [];
@@ -177,16 +193,33 @@ const MIME_SUFFIX: Record<string, string> = {
 	"image/tiff": ".tiff",
 };
 
+/** Firma magica minima per formato (niente librerie). Ritorna il suffisso o undefined. */
+export function sniffImage(buf: Buffer): string | undefined {
+	if (buf.length >= 8 && buf[0] === 0x89 && buf.subarray(1, 4).toString() === "PNG") return ".png";
+	if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xd8) return ".jpg";
+	if (buf.subarray(0, 6).toString() === "GIF87a" || buf.subarray(0, 6).toString() === "GIF89a") return ".gif";
+	if (buf.subarray(0, 4).toString() === "RIFF" && buf.subarray(8, 12).toString() === "WEBP") return ".webp";
+	if (buf.subarray(0, 2).toString() === "BM") return ".bmp";
+	const bo = buf.subarray(0, 4).toString("hex");
+	if (bo === "49492a00" || bo === "4d4d002a") return ".tiff";
+	return undefined;
+}
+
 export async function imageToTmpFile(
 	img: { data: string; mimeType: string },
 ): Promise<string> {
 	const b64 = img.data.includes(",") ? img.data.slice(img.data.indexOf(",") + 1) : img.data;
+	const buf = Buffer.from(b64, "base64");
+	const sniffed = sniffImage(buf);
+	if (!sniffed) {
+		const head = buf.subarray(0, 32).toString("utf-8", 0, Math.min(buf.length, 32)).replace(/[^\x20-\x7e]/g, "?");
+		throw new Error(`file non valido come immagine (${buf.length} byte, inizia con: ${head || "vuoto"})`);
+	}
 	const dir = join(tmpdir(), "ocr-pi-images");
 	await mkdir(dir, { recursive: true });
-	const suffix = MIME_SUFFIX[img.mimeType] ?? ".bin";
-	const name = `${createHash("sha256").update(b64).digest("hex").slice(0, 16)}-${randomUUID().slice(0, 8)}${suffix}`;
+	const name = `${createHash("sha256").update(b64).digest("hex").slice(0, 16)}-${randomUUID().slice(0, 8)}${sniffed}`;
 	const path = join(dir, name);
-	await writeFile(path, Buffer.from(b64, "base64"));
+	await writeFile(path, buf);
 	return path;
 }
 
@@ -247,7 +280,11 @@ export default function (pi: ExtensionAPI) {
 		const parts: string[] = [];
 		for (let i = 0; i < sources.length; i++) {
 			const path = sources[i];
-			progress(ctx, `ocr-pi: conversione immagine ${i + 1}/${sources.length} in corso (la prima volta ~2 min)...`);
+			if (!isValidImageFile(path)) {
+				ctx.ui.notify(`ocr-pi: salto ${path} (non è un'immagine valida)`, "warning");
+				continue;
+			}
+			progress(ctx, `ocr-pi: conversione ${basename(path)} (${i + 1}/${sources.length}) in corso (la prima volta ~2 min)...`);
 			const r = await runner(path, ctx.cwd);
 			progress(ctx);
 			let md = r.markdown;
@@ -262,6 +299,10 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 			parts.push(`### Immagine ${i + 1} (OCR ${r.engine}, ${r.seconds}s)\n\n${md}`);
+		}
+		if (parts.length === 0) {
+			ctx.ui.notify("ocr-pi: nessuna immagine valida da convertire", "warning");
+			return undefined;
 		}
 		return {
 			message: { customType: "ocr-pi", content: parts.join("\n\n"), display: true },
