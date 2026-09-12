@@ -16,12 +16,13 @@ Test senza modelli: `python3` di sistema basta (solo stdlib).
 ## Uso
 
 ```bash
-# test (36, solo stdlib)
+# test: python base (skip deskew) e venv completo
 python3 -m unittest discover -s ocr-pi/tests -t .
+ocr-pi/.venv/bin/python -m unittest discover -s ocr-pi/tests -t .
 
 # benchmark corpus (fake deterministico / docling reale)
 python3 bench/run.py --engine fake
-ocr-pi/.venv/bin/python bench/run.py --engine docling
+ocr-pi/.venv/bin/python bench/run.py --engine docling [--include-warped]
 
 # wiki-manager CLI
 python3 ocr-pi/cli.py --root . list
@@ -53,5 +54,5 @@ ocr-pi/.venv/bin/python ocr-pi/server.py --root . --selftest  # lista tool
 
 ## Moduli
 
-`converter.py` (b1) · `wiki.py` (b3: layout + SKILL + zip) · `manager.py` + `cli.py` (b4)
-· `server.py` (b5: 9 tool) · `preview.py` (b7) · deskew e hook pi: ticket [b2]/[b6] aperti.
+`converter.py` (b1) · `deskew.py` (b2: stima tilt, deskew, warp deterministico) · `wiki.py` (b3: layout + SKILL + zip) · `manager.py` + `cli.py` (b4)
+· `server.py` (b5: 9 tool) · `preview.py` (b7) · hook pi: ticket [b6] aperto.

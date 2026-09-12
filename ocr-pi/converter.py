@@ -18,6 +18,7 @@ class ConvertResult:
     pages: int = 0
     engine: str = ""
     seconds: float = 0.0
+    deskew_applied: bool = False
 
 
 class Engine:
@@ -95,8 +96,11 @@ def convert(
     engine="docling",
     workdir=".",
     engine_obj=None,
+    deskew=False,
 ) -> ConvertResult:
-    """Converte un PDF/immagine. `engine_obj` inietta un engine (test)."""
+    """Converte un PDF/immagine. `engine_obj` inietta un engine (test).
+    deskew=True raddrizza le immagini prima dell'OCR (sui PDF non applicato:
+    i motori gestiscono il layout, vedi ticket [b2])."""
     src = Path(source)
     if not src.exists():
         raise FileNotFoundError(f"sorgente assente: {src}")
@@ -113,6 +117,14 @@ def convert(
         raise ValueError(f"pagine 1-based: {wanted}")
     workdir = Path(workdir)
     t0 = time.monotonic()
+    deskew_applied = False
+    if deskew and src.suffix.lower() != ".pdf":
+        from deskew import deskew_file
+        fixed = workdir / f"{src.stem}-deskewed{src.suffix}"
+        workdir.mkdir(parents=True, exist_ok=True)
+        deskew_file(src, fixed)
+        src = fixed
+        deskew_applied = True
     markdown, assets, n_pages = engine_obj.convert_pdf(src, wanted, workdir)
     return ConvertResult(
         markdown=markdown,
@@ -120,4 +132,5 @@ def convert(
         pages=n_pages,
         engine=engine_obj.name,
         seconds=time.monotonic() - t0,
+        deskew_applied=deskew_applied,
     )

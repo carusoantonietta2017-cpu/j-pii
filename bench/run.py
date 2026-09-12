@@ -11,6 +11,7 @@ noto) + s/pagina. TEDS/CER completi al ticket [b2] con derivate warped.
 """
 import argparse
 import csv
+import difflib
 import json
 import sys
 import time
@@ -35,6 +36,39 @@ def expected_cells(csv_path: Path) -> list:
 def exact_match(markdown: str, cells: list) -> dict:
     found = [c for c in cells if c in markdown]
     return {"expected": len(cells), "found": len(found), "missing": [c for c in cells if c not in markdown]}
+
+
+def render_page(pdf: Path, dpi: int, dest: Path):
+    try:
+        import fitz
+    except ImportError:
+        raise RuntimeError("serve pymupdf per --include-warped") from None
+    doc = fitz.open(pdf)
+    pix = doc[0].get_pixmap(dpi=dpi)
+    dest.write_bytes(pix.tobytes("png"))
+
+
+def warped_eval(pdf: Path, cells: list, engine: str, workdir: Path) -> dict:
+    """Straight vs warped (foto storta sintetica seed fisso): em + similarita'."""
+    try:
+        import cv2
+    except ImportError:
+        return {"file": pdf.name, "kind": "warped-pair", "skipped": True,
+                "reason": "serve opencv per --include-warped"}
+    sys.path.insert(0, str(ROOT / "ocr-pi"))
+    from deskew import warp_perspective
+    straight = workdir / f"{pdf.stem}_straight.png"
+    render_page(pdf, 200, straight)
+    img = cv2.imread(str(straight))
+    cv2.imwrite(str(workdir / f"{pdf.stem}_warped.png"), warp_perspective(img))
+    rs = convert(straight, engine=engine, workdir=workdir)
+    rw = convert(workdir / f"{pdf.stem}_warped.png", engine=engine, workdir=workdir)
+    sim = round(difflib.SequenceMatcher(None, rs.markdown, rw.markdown).ratio(), 3)
+    return {"file": pdf.name, "kind": "warped-pair", "ok": True,
+            "em_straight": exact_match(rs.markdown, cells),
+            "em_warped": exact_match(rw.markdown, cells),
+            "similarity": sim,
+            "sec_straight": round(rs.seconds, 2), "sec_warped": round(rw.seconds, 2)}
 
 
 def run_one(pdf: Path, engine: str, workdir: Path, cells: list | None) -> dict:
@@ -62,6 +96,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", default="fake")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--include-warped", action="store_true",
+                    help="coppie straight-vs-warped sui sintetici (richiede pymupdf+opencv)")
     args = ap.parse_args()
 
     workdir = Path(args.out or (ROOT / "bench" / "report")).resolve()
@@ -72,6 +108,12 @@ def main() -> int:
         csv_path = pdf.with_suffix(".csv")
         cells = expected_cells(csv_path) if csv_path.exists() else None
         rows.append(run_one(pdf, args.engine, workdir / "md", cells))
+        if args.include_warped and cells is not None:
+            try:
+                rows.append(warped_eval(pdf, cells, args.engine, workdir / "md"))
+            except RuntimeError as e:
+                rows.append({"file": pdf.name, "kind": "warped-pair",
+                             "skipped": True, "reason": str(e)})
 
     if MANIFEST.exists():
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
@@ -89,6 +131,12 @@ def main() -> int:
     for r in rows:
         if r.get("skipped"):
             print(f"  {r['file']}: SKIP {r['reason']}")
+            continue
+        if r.get("kind") == "warped-pair":
+            a, b = r["em_straight"], r["em_warped"]
+            print(f"  {r['file']} warped: em {a['found']}/{a['expected']} -> "
+                  f"{b['found']}/{b['expected']} sim={r['similarity']} "
+                  f"({r['sec_straight']}s->{r['sec_warped']}s)")
             continue
         extra = ""
         if r.get("ok") and "exact_match" in r:
