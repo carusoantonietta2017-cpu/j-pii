@@ -7,6 +7,19 @@
 <style>
   :root { --bd: #dadce0; --acc: #137333; --hl: #fff3b0; }
   * { box-sizing: border-box; }
+  html { touch-action: manipulation; }
+  a.skip { position: absolute; left: -999px; top: 0; background: #fff; padding: 8px; z-index: 20; }
+  a.skip:focus-visible { left: 0; }
+  button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid #1a73e8; outline-offset: 2px; }
+  button:hover { filter: brightness(.96); }
+  @media (prefers-reduced-motion: reduce) { aside { transition: none; } }
+  header, #dock { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  #dock { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
+  aside { overscroll-behavior: contain; }
+  .tablewrap { overflow-x: auto; }
+  aside li.sub button { all: unset; display: block; width: 100%; padding: 6px 8px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  aside li.sub button:focus-visible { outline: 3px solid #1a73e8; outline-offset: -1px; }
+  aside li.sel button { background: #e8f0fe; }
   body { font-family: system-ui, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100dvh; }
   header { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--bd); }
   #burger { display: none; font-size: 20px; border: 1px solid var(--bd); background: #fff; border-radius: 8px; padding: 4px 10px; }
@@ -51,20 +64,21 @@
 </style>
 </head>
 <body>
-<header><button id="burger" aria-label="menu">☰</button><strong>ocr-pi</strong><span style="color:#5f6368;font-size:13px">mock throwaway — dati finti</span></header>
+<a class="skip" href="#split">Salta al contenuto</a>
+<header><button id="burger" aria-label="menu">☰</button><h1 style="font-size:16px;margin:0">ocr-pi</h1><span style="color:#5f6368;font-size:13px">mock throwaway — dati finti</span></header>
 <div class="q">Demo: sidebar Folder/Wiki · split originale/convertito · dock agente. Su mobile (&lt;800px): drawer, tab, dock a foglio. Reagisci alle domande nel README.</div>
 <div id="work">
   <aside id="side">
     <h2>Folder</h2>
     <ul>
-      <li><b>Banca</b></li><li class="sub sel">aaa00.pdf</li><li class="sub">bbb01.pdf</li>
-      <li><b>Scontrini</b></li><li class="sub">scansione.pdf</li>
+      <li><b>Banca</b></li><li class="sub sel"><button data-f="aaa00.pdf">aaa00.pdf</button></li><li class="sub"><button data-f="bbb01.pdf">bbb01.pdf</button></li>
+      <li><b>Scontrini</b></li><li class="sub"><button data-f="scansione.pdf">scansione.pdf</button></li>
       <li><b>Fatture</b></li>
     </ul>
     <h2>Wiki</h2>
     <ul>
-      <li><b>Banca</b></li><li class="sub">aaa00.md <span title="verificato">✓</span></li><li class="sub">bbb01.md</li>
-      <li><b>Scontrini</b></li><li class="sub">scansione.md</li>
+      <li><b>Banca</b></li><li class="sub"><button data-f="aaa00.md">aaa00.md</button> <span title="verificato">✓</span></li><li class="sub"><button data-f="bbb01.md">bbb01.md</button></li>
+      <li><b>Scontrini</b></li><li class="sub"><button data-f="scansione.md">scansione.md</button></li>
       <li><b>Fatture</b></li>
     </ul>
   </aside>
@@ -97,11 +111,13 @@
         <button id="bHl" aria-pressed="true">Evidenzia tabelle</button>
       </div>
       <p><code>![movimenti](assets/aaa00_p1.png)</code></p>
+      <div class="tablewrap">
       <table id="t" class="hl">
         <tr><th>Data</th><th>Causale</th><th>Importo</th></tr>
         <tr><td>03/08</td><td>Bonifico stipendio</td><td>+1.800,00</td></tr>
         <tr><td>05/08</td><td>Bolletta luce</td><td>-85,40</td></tr>
       </table>
+      </div>
       <p id="toast" role="status" style="color:#137333"></p>
     </section>
   </main>
@@ -109,7 +125,7 @@
 <section id="dock">
   <button id="docktoggle">▲ agente pi</button>
   <div id="docklog"><div><b>pi:</b> ciao! Chiedimi ad es. <i>crea una wiki con il file @aaa00.pdf</i> (demo: rispondo finto)</div></div>
-  <form id="dockform"><input id="dockin" placeholder='crea una wiki con il file @aaa00.pdf' aria-label="comando per l'agente"><button class="primary">Invia</button></form>
+  <form id="dockform"><input id="dockin" name="comando" autocomplete="off" placeholder='es. crea una wiki con il file @aaa00.pdf…' aria-label="comando per l'agente"><button class="primary">Invia</button></form>
 </section>
 <script>
   const $ = id => document.getElementById(id);
@@ -120,8 +136,8 @@
   $('docktoggle').onclick = () => $('dock').classList.toggle('open');
   $('bHl').onclick = e => { const b = e.currentTarget; const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', on); $('t').classList.toggle('hl', on); };
   document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { $('toast').textContent = 'stato voce: ' + b.dataset.r + ' (demo)'; });
-  document.querySelectorAll('#side li.sub').forEach(li => li.onclick = () => {
-    document.querySelectorAll('#side li').forEach(x => x.classList.remove('sel')); li.classList.add('sel');
+  document.querySelectorAll('#side li.sub button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('#side li').forEach(x => x.classList.remove('sel')); b.closest('li').classList.add('sel');
     document.body.classList.remove('nav');
   });
   $('dockform').onsubmit = e => {
