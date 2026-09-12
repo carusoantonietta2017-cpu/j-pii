@@ -105,8 +105,14 @@ test("convert-upload fake + add con assets", async () => {
 	assert.equal(add.body.review, "draft");
 });
 
-test("chat echo SSE", async () => {
-	const r = await fetch(base + "/api/chat", { method: "POST", body: JSON.stringify({ message: "ciao" }) });
+test("chat/new resetta la conversazione", async () => {
+	const r = await j("/api/chat/new", { method: "POST", body: "{}" });
+	assert.equal(r.body.reset, true);
+});
+
+test("chat sensibile+nativa rifiutata senza LLM", async () => {
+	const r = await fetch(base + "/api/chat", { method: "POST",
+		body: JSON.stringify({ message: "x", images: [{ name: "a.png", dataBase64: "aGk=" }], ocr: false, sensitive: true }) });
 	const text = await r.text();
-	assert.ok(text.includes("text_delta") && text.includes("done"));
+	assert.ok(text.includes("non mascherabile") && text.includes("done"));
 });
