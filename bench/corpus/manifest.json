@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "note": "PDF arXiv pinnati a versione vN; scaricati da fetch.py in native/, non committati. Verificare licenza sulle pagine abs prima dell'uso.",
+  "files": [
+    {
+      "filename": "docling.pdf",
+      "url": "https://arxiv.org/pdf/2408.09869v5",
+      "abs": "https://arxiv.org/abs/2408.09869v5",
+      "sha256": "82dd470712ce8389f19f20eb9330475e2166a281f8c7990a9f1d0763d73b4d22",
+      "bytes": 5566575,
+      "pages": [1, 2, 3]
+    },
+    {
+      "filename": "mineru.pdf",
+      "url": "https://arxiv.org/pdf/2409.18839v1",
+      "abs": "https://arxiv.org/abs/2409.18839v1",
+      "sha256": "bf0260a6105e29efff61bdef9652b506afc9892e943b1593a37d45afa1cdd51c",
+      "bytes": 4428481,
+      "pages": [1, 2, 3]
+    },
+    {
+      "filename": "olmocr.pdf",
+      "url": "https://arxiv.org/pdf/2502.18443v3",
+      "abs": "https://arxiv.org/abs/2502.18443v3",
+      "sha256": "d006f3f9100afd24e728ab469edd44974c849133121b2a4e53525605b9e44bba",
+      "bytes": 14513989,
+      "pages": [1, 2, 3]
+    },
+    {
+      "filename": "olmocr2.pdf",
+      "url": "https://arxiv.org/pdf/2510.19817v1",
+      "abs": "https://arxiv.org/abs/2510.19817v1",
+      "sha256": "00eb8aba59ea9f346776791014c158d97a6b167148c33bdaaa5dec767beca697",
+      "bytes": 1884112,
+      "pages": [1, 2, 3]
+    }
+  ]
+}

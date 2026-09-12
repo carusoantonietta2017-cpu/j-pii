@@ -1,0 +1,58 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 945 >>
+stream
+BT /F1 13 Tf 50 800 Td (Orario 001 \(sintetico\)) Tj ET
+BT /F1 9 Tf 50 782 Td (Settimana dimostrativa) Tj ET
+50 750 m 530 750 l S
+50 732 m 530 732 l S
+50 714 m 530 714 l S
+50 696 m 530 696 l S
+50 678 m 530 678 l S
+50 750 m 50 678 l S
+170 750 m 170 678 l S
+290 750 m 290 678 l S
+410 750 m 410 678 l S
+530 750 m 530 678 l S
+BT /F1 10 Tf 54 737 Td (Giorno) Tj ET
+BT /F1 10 Tf 174 737 Td (08-10) Tj ET
+BT /F1 10 Tf 294 737 Td (10-12) Tj ET
+BT /F1 10 Tf 414 737 Td (14-16) Tj ET
+BT /F1 10 Tf 54 719 Td (Lun) Tj ET
+BT /F1 10 Tf 174 719 Td (Sportello) Tj ET
+BT /F1 10 Tf 294 719 Td (Sportello) Tj ET
+BT /F1 10 Tf 414 719 Td (Archivio) Tj ET
+BT /F1 10 Tf 54 701 Td (Mar) Tj ET
+BT /F1 10 Tf 174 701 Td (Udienze) Tj ET
+BT /F1 10 Tf 294 701 Td (Udienze) Tj ET
+BT /F1 10 Tf 414 701 Td (Udienze) Tj ET
+BT /F1 10 Tf 54 683 Td (Mer) Tj ET
+BT /F1 10 Tf 174 683 Td (Studio) Tj ET
+BT /F1 10 Tf 294 683 Td (Studio) Tj ET
+BT /F1 10 Tf 414 683 Td (Ricevimento) Tj ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+1307
+%%EOF

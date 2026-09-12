@@ -51,3 +51,7 @@ Thumbs.db
 
 # ── scratch locale (il tracker è GitHub, non i file) ──
 .scratch/
+
+# ── bench corpus: binari scaricati/generati, solo script+manifest versionati ──
+bench/corpus/native/
+bench/corpus/derived/
