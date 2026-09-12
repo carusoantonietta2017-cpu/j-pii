@@ -23,34 +23,36 @@ function opts() {
 // --- mini renderer markdown: tabelle, immagini, titoli, codice ---
 function renderMd(md, fileUrl) {
 	const dir = fileUrl.split("/").slice(0, -1).join("/");
+	const imgTag = (tok) => {
+		const m = tok.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+		if (!m) return esc(tok);
+		const s = m[2].trim();
+		if (/^(javascript|vbscript|data:text\/html)/i.test(s)) return esc(m[1]);
+		const u = s.startsWith("http") || s.startsWith("/") ? s : dir + "/" + s;
+		return `<img class="doc" loading="lazy" alt="${esc(m[1])}" src="${esc(u)}">`;
+	};
+	const inline = (raw) => raw.split(/(!\[[^\]]*\]\([^)]+\))/g).map((tok, k) => (k % 2 ? imgTag(tok) : esc(tok))).join("");
 	const lines = md.split("\n");
 	let html = "", i = 0, inCode = false;
-	const inlineImg = (t) => t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
-		const u = src.startsWith("http") || src.startsWith("/") ? src : dir + "/" + src;
-		return `<img class="doc" loading="lazy" alt="${esc(alt)}" src="${u}">`;
-	});
 	while (i < lines.length) {
 		const l = lines[i];
 		if (l.trim().startsWith("```")) { html += inCode ? "</pre>" : "<pre>"; inCode = !inCode; i++; continue; }
 		if (inCode) { html += esc(l) + "\n"; i++; continue; }
 		if (l.trim().startsWith("|") && lines[i + 1] && /^\|[\s:|-]+\|$/.test(lines[i + 1].trim())) {
-			const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => `<td>${inlineImg(esc(c.trim()))}</td>`).join("");
-			const head = l.trim().replace(/^\||\|$/g, "").split("|").map((c) => `<th>${esc(c.trim())}</th>`).join("");
-			html += `<div class="tablewrap"><table class="hl"><tr>${head}</tr>`;
+			const row = (r, cell) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => `<${cell}>${inline(c.trim())}</${cell}>`).join("");
+			html += `<div class="tablewrap"><table class="hl"><tr>${row(lines[i], "th")}</tr>`;
 			i += 2;
-			while (i < lines.length && lines[i].trim().startsWith("|")) { html += `<tr>${cells(lines[i])}</tr>`; i++; }
+			while (i < lines.length && lines[i].trim().startsWith("|")) { html += `<tr>${row(lines[i], "td")}</tr>`; i++; }
 			html += "</table></div>";
 			continue;
 		}
 		const h = l.match(/^(#{1,3})\s+(.*)/);
-		if (h) { const n = h[1].length + 1; html += `<h${n}>${inlineImg(esc(h[2]))}</h${n}>`; i++; continue; }
-		if (l.trim()) html += `<p>${inlineImg(esc(l))}</p>`;
+		if (h) { const n = h[1].length + 1; html += `<h${n}>${inline(h[2])}</h${n}>`; i++; continue; }
+		if (l.trim()) html += `<p>${inline(l)}</p>`;
 		i++;
 	}
 	return html || "<p>(vuoto)</p>";
 }
-
-const SENSITIVE = /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 
 // --- sidebar ---
 async function refresh() {
@@ -226,6 +228,10 @@ $("dockform").addEventListener("submit", async (e) => {
 	$("dock").classList.add("open");
 	$("docklog").insertAdjacentHTML("beforeend", `<div><b>tu:</b> ${esc(v)}</div>`);
 	$("dockin").value = "";
+	const btn = e.target.querySelector("button");
+	btn.disabled = true;
+	const label = btn.textContent;
+	btn.textContent = "Invio…";
 	try {
 		let images = [];
 		if (f) {
@@ -245,6 +251,9 @@ $("dockform").addEventListener("submit", async (e) => {
 		}
 	} catch (err) {
 		$("docklog").insertAdjacentHTML("beforeend", `<div><b>pi:</b> errore: ${esc(err.message)}</div>`);
+	} finally {
+		btn.disabled = false;
+		btn.textContent = label;
 	}
 });
 

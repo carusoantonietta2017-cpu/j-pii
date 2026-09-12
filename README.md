@@ -124,7 +124,20 @@ interruttore Mask e pulsanti Approva/Rimanda collegati alla wiki.
 
 ---
 
-## 6. Se qualcosa non va
+## 6. App web (PWA locale)
+
+```bash
+cd ui && npm install          # solo per il dock (SDK pi)
+PORT=8001 UI_WIKI_ROOT=~/wiki node ui/server.mjs
+# apri http://localhost:8001 — anche dal telefono in rete locale
+```
+
+Sidebar Folder/Wiki, split originale/convertito, review approva/rimanda,
+menu esporta/importa/rinomina, converti-da-file, dock agente con immagini.
+Prima conversione lenta (~2 min), poi secondi (demone). `JPII_*` come sopra
+per la mask nel dock; modello dock via `UI_MODEL` (default opencode gratis).
+
+## 7. Se qualcosa non va
 
 | Sintomo | Cosa fare |
 |---|---|
@@ -138,7 +151,7 @@ interruttore Mask e pulsanti Approva/Rimanda collegati alla wiki.
 Log utili: `/tmp/ocr-pi-daemon.log` (demone converter),
 `/tmp/jpii-payload.log` (cosa riceve davvero l'LLM, con extension debug).
 
-## 7. Per sviluppatori
+## 8. Per sviluppatori
 
 ```bash
 python3 -m unittest discover -s ocr-pi/tests -t .   # test rapidi (fake)
