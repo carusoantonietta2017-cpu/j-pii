@@ -103,6 +103,18 @@ export async function imageToTmpFile(
 	return path;
 }
 
+/** Avanzamento facoltativo: non deve mai rompere (test e RPC senza widget). */
+function progress(ctx: any, msg?: string): void {
+	try {
+		if (msg) {
+			ctx.ui.notify?.(msg, "info");
+			ctx.ui.setStatus?.("ocr-pi", msg);
+		} else {
+			ctx.ui.setStatus?.("ocr-pi", "");
+		}
+	} catch { /* ui assente: ignora */ }
+}
+
 const failClosed = (why: string): never => {
 	throw new Error(`ocr-pi blocked: ${why} (fail-closed, niente inviato)`);
 };
@@ -147,7 +159,9 @@ export default function (pi: ExtensionAPI) {
 		const parts: string[] = [];
 		for (let i = 0; i < sources.length; i++) {
 			const path = sources[i];
+			progress(ctx, `ocr-pi: conversione immagine ${i + 1}/${sources.length} in corso (la prima volta ~2 min)...`);
 			const r = await runner(path, ctx.cwd);
+			progress(ctx);
 			let md = r.markdown;
 			if (sensitive) {
 				const m = await maskTextForOcr(md, ctx.cwd);

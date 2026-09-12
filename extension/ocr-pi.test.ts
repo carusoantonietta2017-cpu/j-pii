@@ -60,6 +60,12 @@ test("Si/Si: inietta md mascherato, chiede due volte", async () => {
 	assert.equal(out.message.content.includes(CF), false);
 });
 
+test("durante OCR: messaggio di attesa", async () => {
+	const { pi, ctx, notices } = setup(["Sì, converti in locale", "No"]);
+	await pi.handlers["before_agent_start"]({ prompt: "x", images: [IMG] }, ctx);
+	assert.ok(notices.some((n) => n.includes("in corso")), notices.join("|"));
+});
+
 test("Si/No: inietta md in chiaro", async () => {
 	const { pi, ctx } = setup(["Sì, converti in locale", "No"]);
 	const out = (await pi.handlers["before_agent_start"]({ prompt: "x", images: [IMG] }, ctx)) as {
