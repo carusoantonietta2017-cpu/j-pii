@@ -68,6 +68,22 @@ const clearedKeys = new Set<string>();
 
 export const spanKey = (s: DoubtfulSpan): string => `${s.label} ${s.value}`;
 
+/** Mask per l'hook ocr-pi: maschera + forza i doubtful (fail-safe, niente leak).
+ *  Usa lo stesso store/mapping di sessione: il restore in message_end vale anche qui. */
+export async function maskTextForOcr(
+	text: string,
+	cwd = ".",
+): Promise<{ text: string; doubtfulForced: number }> {
+	const { result, doubtful } = await maskStrings(text, cwd);
+	let out = result as unknown as string;
+	for (const d of doubtful) {
+		const ph = store.forceMask(d.value, d.label);
+		sessionMapping.set(ph, d.value);
+		out = out.split(d.value).join(ph);
+	}
+	return { text: out, doubtfulForced: doubtful.length };
+}
+
 export function partitionDecided(
 	spans: DoubtfulSpan[],
 	forced: Set<string>,
