@@ -17,6 +17,20 @@
   #dock { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
   aside { overscroll-behavior: contain; }
   .tablewrap { overflow-x: auto; }
+  #q { width: calc(100% - 16px); margin: 4px 8px; padding: 9px 10px; font-size: 15px; border: 1px solid var(--bd); border-radius: 8px; }
+  .sechead { display: flex; align-items: center; }
+  .sechead h2 { flex: 1; }
+  .iconbtn { border: 1px solid var(--bd); background: #fff; border-radius: 8px; padding: 4px 10px; font-size: 15px; }
+  #daemonbadge { font-size: 12px; border: 1px solid var(--bd); border-radius: 12px; padding: 2px 10px; background: #e6f4ea; }
+  #daemonbadge .dot { color: var(--acc); }
+  #optpanel { display: none; border: 1px solid var(--bd); border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-size: 14px; background: #fff; }
+  #optpanel.open { display: block; }
+  #optpanel label { display: block; margin: 6px 0; }
+  .pill { font-size: 11px; border: 1px solid #b06000; color: #b06000; border-radius: 10px; padding: 1px 8px; margin-left: 6px; }
+  #wikimenu { display: none; border: 1px solid var(--bd); border-radius: 8px; background: #fff; padding: 4px; margin: 0 0 8px; }
+  #wikimenu.open { display: block; }
+  #wikimenu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 9px 10px; font-size: 15px; border-radius: 6px; }
+  #trashli { color: #5f6368; }
   aside li.sub button { all: unset; display: block; width: 100%; padding: 6px 8px; border-radius: 6px; font-size: 14px; cursor: pointer; }
   aside li.sub button:focus-visible { outline: 3px solid #1a73e8; outline-offset: -1px; }
   aside li.sel button { background: #e8f0fe; }
@@ -65,22 +79,31 @@
 </head>
 <body>
 <a class="skip" href="#split">Salta al contenuto</a>
-<header><button id="burger" aria-label="menu">☰</button><h1 style="font-size:16px;margin:0">ocr-pi</h1><span style="color:#5f6368;font-size:13px">mock throwaway — dati finti</span></header>
+<header><button id="burger" aria-label="menu">☰</button><h1 style="font-size:16px;margin:0">ocr-pi</h1><span id="daemonbadge"><span class="dot">●</span> demone pronto</span><span style="color:#5f6368;font-size:13px">mock throwaway — dati finti</span></header>
 <div class="q">Demo: sidebar Folder/Wiki · split originale/convertito · dock agente. Su mobile (&lt;800px): drawer, tab, dock a foglio. Reagisci alle domande nel README.</div>
 <div id="work">
   <aside id="side">
+    <input id="q" name="cerca" autocomplete="off" placeholder="es. cerca iva…" aria-label="cerca nelle wiki">
     <h2>Folder</h2>
     <ul>
       <li><b>Banca</b></li><li class="sub sel"><button data-f="aaa00.pdf">aaa00.pdf</button></li><li class="sub"><button data-f="bbb01.pdf">bbb01.pdf</button></li>
       <li><b>Scontrini</b></li><li class="sub"><button data-f="scansione.pdf">scansione.pdf</button></li>
       <li><b>Fatture</b></li>
     </ul>
-    <h2>Wiki</h2>
+    <div class="sechead"><h2>Wiki</h2><button class="iconbtn" id="wikimenubtn" aria-label="menu wiki" aria-expanded="false">⋯</button></div>
+    <div id="mtoast" role="status" style="font-size:13px;color:#137333;min-height:18px"></div>
+    <div id="wikimenu" role="menu">
+      <button data-m="Esporta zip (demo)">Esporta zip</button>
+      <button data-m="Esporta senza originali (demo)">Esporta senza originali</button>
+      <button data-m="Importa zip (demo)">Importa zip…</button>
+    </div>
     <ul>
-      <li><b>Banca</b></li><li class="sub"><button data-f="aaa00.md">aaa00.md</button> <span title="verificato">✓</span></li><li class="sub"><button data-f="bbb01.md">bbb01.md</button></li>
+      <li><b>Banca</b></li><li class="sub"><button data-f="aaa00.md">aaa00.md</button> <span title="verificato">✓</span><span class="pill" title="contiene dati sensibili: canale LLM mascherato">sensibili</span></li><li class="sub"><button data-f="bbb01.md">bbb01.md</button></li>
       <li><b>Scontrini</b></li><li class="sub"><button data-f="scansione.md">scansione.md</button></li>
       <li><b>Fatture</b></li>
     </ul>
+    <h2>Altro</h2>
+    <ul><li class="sub" id="trashli"><button data-f="cestino">🗑 Cestino (1)</button></li></ul>
   </aside>
   <main id="split" data-tab="pdf">
     <div class="tabs" role="tablist">
@@ -109,6 +132,13 @@
         <button class="primary" data-r="reviewed">Approva</button>
         <button data-r="draft">Rimanda a draft</button>
         <button id="bHl" aria-pressed="true">Evidenzia tabelle</button>
+        <button id="bOpt" aria-expanded="false">Opzioni</button>
+        <button id="bMask" aria-pressed="false">Mostra Mask</button>
+      </div>
+      <div id="optpanel">
+        <label>Motore <select id="engine"><option>Docling (default)</option><option>PaddleOCR (foto storte)</option><option>MinerU (tabelle complesse)</option></select></label>
+        <label><input type="checkbox" checked> Raddrizza foto storte (deskew)</label>
+        <div style="color:#5f6368">Modelli in locale, mai in rete. Seconda conversione in secondi (demone).</div>
       </div>
       <p><code>![movimenti](assets/aaa00_p1.png)</code></p>
       <div class="tablewrap">
@@ -118,6 +148,7 @@
         <tr><td>05/08</td><td>Bolletta luce</td><td>-85,40</td></tr>
       </table>
       </div>
+      <p id="cfline">Intestatario fittizio: <span id="cfval">RSSMRA00A01H501U</span></p>
       <p id="toast" role="status" style="color:#137333"></p>
     </section>
   </main>
@@ -134,6 +165,13 @@
   $('tPdf').onclick = () => { split.dataset.tab = 'pdf'; $('tPdf').setAttribute('aria-pressed','true'); $('tMd').setAttribute('aria-pressed','false'); };
   $('tMd').onclick = () => { split.dataset.tab = 'md'; $('tMd').setAttribute('aria-pressed','true'); $('tPdf').setAttribute('aria-pressed','false'); };
   $('docktoggle').onclick = () => $('dock').classList.toggle('open');
+  $('wikimenubtn').onclick = e => { const m = $('wikimenu'); const open = !m.classList.contains('open'); m.classList.toggle('open', open); e.currentTarget.setAttribute('aria-expanded', open); };
+  document.querySelectorAll('#wikimenu button').forEach(b => b.onclick = () => { $('mtoast').textContent = b.dataset.m; $('wikimenu').classList.remove('open'); });
+  $('bOpt').onclick = e => { const p = $('optpanel'); const open = !p.classList.contains('open'); p.classList.toggle('open', open); e.currentTarget.setAttribute('aria-expanded', open); };
+  const REALCF = 'RSSMRA00A01H501U';
+  let masked = false;
+  $('bMask').onclick = e => { masked = !masked; e.currentTarget.textContent = masked ? 'Mostra valori' : 'Mostra Mask'; e.currentTarget.setAttribute('aria-pressed', masked); $('cfval').textContent = masked ? '[CF_1]' : REALCF; };
+  $('q').oninput = e => { const q = e.target.value.toLowerCase(); document.querySelectorAll('#side li.sub button').forEach(b => { b.closest('li').style.display = !q || b.textContent.toLowerCase().includes(q) ? '' : 'none'; }); };
   $('bHl').onclick = e => { const b = e.currentTarget; const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', on); $('t').classList.toggle('hl', on); };
   document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { $('toast').textContent = 'stato voce: ' + b.dataset.r + ' (demo)'; });
   document.querySelectorAll('#side li.sub button').forEach(b => b.onclick = () => {
