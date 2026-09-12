@@ -2,7 +2,7 @@
 // Runner finto iniettato; analyzer fake (niente modello).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import ocrPi, { __resetSession, __setRunner, imagePathsFromPrompt } from "./ocr-pi.ts";
+import ocrPi, { Daemon, __resetSession, __setRunner, imagePathsFromPrompt } from "./ocr-pi.ts";
 
 process.env.JPII_ANALYZER = "fake";
 
@@ -142,4 +142,21 @@ test("path citato senza allegati: chiede e converte il file vero", async () => {
 	assert.equal(asked.length, 2);
 	assert.equal(converted, "/tmp/fattura-demo.png");
 	assert.ok(out.message.content.includes("tabella vera"));
+});
+
+test("Daemon: ping+convert veri contro daemon.py (fake engine)", async () => {
+	const { mkdtempSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = mkdtempSync(join(tmpdir(), "ocr-pi-daemontest-"));
+	const pdf = join(dir, "a.pdf");
+	writeFileSync(pdf, "%PDF-1.4 fake");
+	const d = new Daemon();
+	try {
+		const r = await d.request(pdf, dir, 60_000, "fake");
+		assert.equal(r.engine, "fake");
+		assert.ok(r.markdown.includes("|"));
+	} finally {
+		d.stop();
+	}
 });
