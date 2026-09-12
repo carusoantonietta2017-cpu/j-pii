@@ -28,7 +28,7 @@ function renderMd(md, fileUrl) {
 		if (!m) return esc(tok);
 		const s = m[2].trim();
 		if (/^(javascript|vbscript|data:text\/html)/i.test(s)) return esc(m[1]);
-		const u = s.startsWith("http") || s.startsWith("/") ? s : dir + "/" + s;
+		const u = s.startsWith("http") || s.startsWith("/") || s.startsWith("blob:") || s.startsWith("data:") ? s : dir + "/" + s;
 		return `<img class="doc" loading="lazy" alt="${esc(m[1])}" src="${esc(u)}">`;
 	};
 	const inline = (raw) => raw.split(/(!\[[^\]]*\]\([^)]+\))/g).map((tok, k) => (k % 2 ? imgTag(tok) : esc(tok))).join("");
@@ -55,7 +55,36 @@ function renderMd(md, fileUrl) {
 }
 
 // --- sidebar ---
+function shortPath(p) {
+	const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
+	return parts.length > 2 ? "…/" + parts.slice(-2).join("/") : p;
+}
+
+async function convertServerFile(path) {
+	toast("conversione in corso… (prima volta ~2 min)");
+	try {
+		const o = opts();
+		const r = await post("/api/convert", { path, engine: o.engine || "docling", deskew: !!o.deskew });
+		const base = path.split("/").pop();
+		$("orig").innerHTML = `<h2>originale: ${esc(base)}</h2><p style="color:#5f6368">${esc(path)}</p>`;
+		$("conv").innerHTML = `<h2>${esc(base)} <span style="font-size:12px;color:#5f6368">anteprima non salvata (${r.seconds}s)</span></h2>
+			<div class="toolbar"><button class="primary" id="bsave2">Salva in wiki…</button></div>
+			<div>${renderMd(r.markdown, "")}</div>`;
+		$("bsave2").onclick = async () => {
+			const w = prompt("Wiki di destinazione:", currentWiki() || "demo");
+			if (!w) return;
+			await post(`/api/wiki/${encodeURIComponent(w)}/add`, { markdown: r.markdown, title: base.replace(/\.[^.]+$/, "") });
+			toast("salvata come draft");
+			await refresh();
+		};
+		toast("convertita: premi Salva in wiki");
+	} catch (err) {
+		toast("errore: " + err.message);
+	}
+}
+
 async function refresh() {
+	await loadSources();
 	const wikis = await api("/api/wikis");
 	state.wikis = wikis.map((w) => w.slug);
 	state.details = {};
@@ -73,19 +102,48 @@ async function refresh() {
 	}
 }
 
+async function loadSources() {
+	try {
+		state.sources = await api("/api/sources");
+	} catch {
+		state.sources = [];
+	}
+}
+
 function renderSide(filter = "") {
 	const q = filter.toLowerCase();
 	const folder = $("folder");
 	folder.innerHTML = "";
+	for (const s of state.sources || []) {
+		folder.insertAdjacentHTML("beforeend", `<li><b>${esc(shortPath(s.path))}</b></li>`);
+		for (const f of s.files) {
+			const base = f.split("/").pop();
+			if (q && !base.toLowerCase().includes(q)) continue;
+			folder.insertAdjacentHTML("beforeend", `<li class="sub"><button data-src="${esc(f)}" title="converti">${esc(base)}</button></li>`);
+		}
+	}
 	for (const slug of state.wikis) {
 		const d = state.details[slug];
 		if (!d.raw.length) continue;
-		folder.insertAdjacentHTML("beforeend", `<li><b>${esc(slug)}</b></li>`);
+		folder.insertAdjacentHTML("beforeend", `<li><b>${esc(slug)} (wiki)</b></li>`);
 		for (const f of d.raw) {
 			folder.insertAdjacentHTML("beforeend", `<li class="sub">raw/${esc(f)}</li>`);
 		}
 	}
+	folder.insertAdjacentHTML("beforeend", `<li class="sub"><button id="addsrc">+ cartella sorgente…</button></li>`);
 	if (!folder.children.length) folder.innerHTML = "<li class='sub'>—</li>";
+	folder.querySelectorAll("button[data-src]").forEach((b) => { b.onclick = () => convertServerFile(b.dataset.src); });
+	const addBtn = folder.querySelector("#addsrc");
+	if (addBtn) addBtn.onclick = async () => {
+		const p = prompt("Cartella da leggere (es. C:/dsdsd oppure /mnt/c/dsdsd):");
+		if (!p) return;
+		try {
+			await post("/api/sources", { path: p });
+			await refresh();
+		} catch (err) {
+			toast("errore: " + err.message);
+		}
+	};
 	const ul = $("wikis");
 	ul.innerHTML = "";
 	for (const slug of state.wikis) {
@@ -181,10 +239,19 @@ $("upick").addEventListener("change", async (e) => {
 		for (const b of new Uint8Array(buf)) binary += String.fromCharCode(b);
 		const o = opts();
 		const r = await post("/api/convert-upload", { name: f.name, dataBase64: btoa(binary), engine: o.engine || "docling", deskew: !!o.deskew });
-		sessionStorage.setItem("ocr-pi-conv", JSON.stringify(r));
-		$("conv").innerHTML = `<h2>${esc(f.name)} <span style="font-size:12px;color:#5f6368">anteprima non salvata</span></h2>
+		const objUrl = URL.createObjectURL(new Blob([buf], { type: f.type || "application/octet-stream" }));
+		$("orig").innerHTML = `<h2>originale: ${esc(f.name)}</h2>` +
+			(f.type.startsWith("image/") ? `<img class="doc" src="${objUrl}" alt="originale">` : `<p><a href="${objUrl}">apri originale (${esc(f.name)})</a></p>`);
+		const amap = {};
+		for (const a of r.assets || []) {
+			const bytes = Uint8Array.from(atob(a.dataBase64), (c) => c.charCodeAt(0));
+			amap[a.name] = URL.createObjectURL(new Blob([bytes]));
+		}
+		let md = r.markdown;
+		for (const [name, url] of Object.entries(amap)) md = md.split(`](assets/${name})`).join(`](${url})`).split(`](${name})`).join(`](${url})`);
+		$("conv").innerHTML = `<h2>${esc(f.name)} <span style="font-size:12px;color:#5f6368">anteprima non salvata (${r.seconds}s)</span></h2>
 			<div class="toolbar"><button class="primary" id="bsave">Salva in wiki…</button></div>
-			<div>${renderMd(r.markdown, "")}</div>`;
+			<div>${renderMd(md, "")}</div>`;
 		$("bsave").onclick = async () => {
 			const w = prompt("Wiki di destinazione:", currentWiki() || "demo");
 			if (!w) return;

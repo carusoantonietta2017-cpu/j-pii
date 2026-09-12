@@ -74,6 +74,27 @@ function sendErr(res, err) {
 	send(res, status, { error: msg });
 }
 
+async function listSourceFiles(dir) {
+	const exts = [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif", ".gif", ".bmp"];
+	const out = [];
+	const walk = async (d, depth) => {
+		if (depth > 2 || out.length > 200) return;
+		let entries = [];
+		try {
+			entries = await readdir(d, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const e of entries) {
+			const full = join(d, e.name);
+			if (e.isDirectory()) await walk(full, depth + 1);
+			else if (exts.includes(extname(full).toLowerCase())) out.push(full);
+		}
+	};
+	await walk(dir, 0);
+	return out.sort();
+}
+
 const MIME = {
 	".html": "text/html; charset=utf-8",
 	".js": "text/javascript",
@@ -182,6 +203,47 @@ export function createApp() {
 					process.cwd(),
 				);
 				return send(res, 200, result);
+			}
+
+			const SOURCES = () => join(config.wikiRoot, "sources.json");
+			const readSources = async () => {
+				try {
+					return JSON.parse(await readFile(SOURCES(), "utf-8"));
+				} catch {
+					return [];
+				}
+			};
+
+			// GET /api/sources  +  POST /api/sources {path}  +  DELETE /api/sources {path}
+			if (url.pathname === "/api/sources") {
+				if (req.method === "GET") {
+					const out = [];
+					for (const s of await readSources()) {
+						out.push({ path: s, files: await listSourceFiles(s) });
+					}
+					return send(res, 200, out);
+				}
+				const body = JSON.parse((await readBody(req)) || "{}");
+				const list = await readSources();
+				if (req.method === "POST") {
+					let dir = String(body.path ?? "").replace(/\\/g, "/");
+					const drive = dir.match(/^([A-Za-z]):\//);
+					if (drive) dir = `/mnt/${drive[1].toLowerCase()}/${dir.slice(3)}`;
+					try {
+						if (!(await stat(dir)).isDirectory()) return send(res, 400, { error: "non una cartella" });
+					} catch {
+						return send(res, 400, { error: "cartella inesistente" });
+					}
+					if (!list.includes(dir)) list.push(dir);
+					writeFileSync(SOURCES(), JSON.stringify(list));
+					return send(res, 200, { path: dir, files: await listSourceFiles(dir) });
+				}
+				if (req.method === "DELETE") {
+					const next = list.filter((x) => x !== body.path);
+					writeFileSync(SOURCES(), JSON.stringify(next));
+					return send(res, 200, { removed: body.path });
+				}
+				return send(res, 404, { error: "rotta sconosciuta" });
 			}
 
 			// POST /api/wiki {slug}  (nuova wiki)
@@ -341,5 +403,7 @@ export function createApp() {
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
+	const { mkdirSync } = await import("node:fs");
+	mkdirSync(join(config.wikiRoot, "wiki"), { recursive: true });
 	createApp().listen(config.port, () => console.log(`ocr-pi ui su http://localhost:${config.port} (wiki: ${config.wikiRoot})`));
 }

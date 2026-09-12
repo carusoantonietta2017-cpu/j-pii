@@ -62,6 +62,22 @@ test("errori JSON: wiki assente, remove senza confirm", async () => {
 	assert.ok(r.body.error);
 });
 
+test("sources: add/lista/file/rimuovi + path windows", async () => {
+	const fs = await import("node:fs");
+	const dir = process.env.UI_WIKI_ROOT + "/seeddir";
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(dir + "/a.pdf", "%PDF");
+	const bad = await j("/api/sources", { method: "POST", body: JSON.stringify({ path: "/tmp/inesistente-xyz" }) });
+	assert.equal(bad.status, 400);
+	const add = await j("/api/sources", { method: "POST", body: JSON.stringify({ path: dir }) });
+	assert.equal(add.status, 200);
+	assert.ok(add.body.files.some((f) => f.endsWith("a.pdf")));
+	const all = await j("/api/sources");
+	assert.ok(all.body.some((s) => s.path === dir));
+	const del = await j("/api/sources", { method: "DELETE", body: JSON.stringify({ path: dir }) });
+	assert.equal(del.status, 200);
+});
+
 test("convert fake via demone", async () => {
 	const pdf = join(process.env.UI_WIKI_ROOT, "a.pdf");
 	writeFileSync(pdf, "%PDF-1.4 fake");
