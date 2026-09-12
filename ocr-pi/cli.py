@@ -17,46 +17,61 @@ import manager  # noqa: E402
 
 
 def cmd_create(a):
-    print(manager.create_wiki(a.root, a.wiki))
+    p = manager.create_wiki(a.root, a.wiki)
+    out({"wiki": str(p)} if a.json else str(p), a.json)
+
+
+def out(data, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(data, ensure_ascii=False, default=str))
+    elif isinstance(data, list):
+        for row in data:
+            print(row)
+    else:
+        print(data)
 
 
 def cmd_list(a):
-    for w in manager.list_wikis(a.root):
-        print(f"{w['slug']} ({w['voci']} voci)")
+    rows = manager.list_wikis(a.root)
+    out(rows if a.json else [f"{w['slug']} ({w['voci']} voci)" for w in rows], a.json)
 
 
 def cmd_search(a):
-    for h in manager.search(a.root, a.query, stato=a.stato, wiki=a.wiki):
-        print(f"{h['wiki']}:{h['file']}:{h['linea']}: {h['testo'][:120]}")
+    hits = manager.search(a.root, a.query, stato=a.stato, wiki=a.wiki)
+    out(hits if a.json else
+        [f"{h['wiki']}:{h['file']}:{h['linea']}: {h['testo'][:120]}" for h in hits], a.json)
 
 
 def cmd_show(a):
-    print(manager.show(a.root, a.wiki, a.voce))
+    p = manager.show(a.root, a.wiki, a.voce)
+    out({"file": str(p)} if a.json else str(p), a.json)
 
 
 def cmd_add(a):
-    print(json.dumps(manager.add(a.root, a.wiki, a.file, title=a.titolo), ensure_ascii=False))
+    out(manager.add(a.root, a.wiki, a.file, title=a.titolo), a.json)
 
 
 def cmd_review(a):
-    print(json.dumps(manager.review(a.root, a.wiki, a.voce, a.stato), ensure_ascii=False))
+    out(manager.review(a.root, a.wiki, a.voce, a.stato), a.json)
 
 
 def cmd_remove(a):
-    print(json.dumps(manager.remove(a.root, a.wiki, a.voce, confirm=a.confirm), ensure_ascii=False))
+    out(manager.remove(a.root, a.wiki, a.voce, confirm=a.confirm), a.json)
 
 
 def cmd_export(a):
-    print(manager.export(a.root, a.wiki, senza_raw=a.senza_raw))
+    p = manager.export(a.root, a.wiki, senza_raw=a.senza_raw)
+    out({"zip": str(p)} if a.json else str(p), a.json)
 
 
 def cmd_import(a):
-    print(json.dumps(manager.import_wiki(a.root, a.file, merge=a.merge), ensure_ascii=False))
+    out(manager.import_wiki(a.root, a.file, merge=a.merge), a.json)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="wiki")
     ap.add_argument("--root", default=".")
+    ap.add_argument("--json", action="store_true", help="output JSON (per backend/UI)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("create"); p.add_argument("wiki"); p.set_defaults(f=cmd_create)
     sub.add_parser("list").set_defaults(f=cmd_list)
@@ -78,7 +93,10 @@ def main(argv=None) -> int:
     try:
         a.f(a)
     except (LookupError, ValueError, PermissionError, FileNotFoundError) as e:
-        print(f"errore: {e}", file=sys.stderr)
+        if a.json:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"errore: {e}", file=sys.stderr)
         return 1
     return 0
 

@@ -1,0 +1,10 @@
+{
+  "name": "ocr-pi-ui",
+  "version": "0.1.0",
+  "description": "Backend locale PWA ocr-pi (statici + REST + SSE). Zero dipendenze.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test server.test.mjs"
+  }
+}
