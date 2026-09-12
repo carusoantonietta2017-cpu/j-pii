@@ -5,7 +5,7 @@ Due strumenti che lavorano insieme dentro l'agente **pi**:
 - **j-pii** — il buttadifuori della privacy: maschera i dati sensibili prima che arrivino all'LLM e li ripristina nelle risposte. I valori veri non lasciano mai il tuo computer.
 - **ocr-pi** — il convertitore di documenti: trasforma immagini e PDF in Markdown con tabelle (anche storte), li organizza in dizionari wiki consultabili, li espone all'agente (MCP + app web con dock) e chiede il permesso prima di ogni immagine (hook).
 
-Questa guida spiega tutto in parole semplici. Il capitolo 9 è il tour dei
+Questa guida spiega tutto in parole semplici. Il capitolo 8 è il tour dei
 test guidato, scritto per chi legge dopo e vuole riverificare tutto.
 
 ---
