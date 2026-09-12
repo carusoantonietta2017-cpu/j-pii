@@ -59,6 +59,14 @@ def cmd_remove(a):
     out(manager.remove(a.root, a.wiki, a.voce, confirm=a.confirm), a.json)
 
 
+def cmd_rename(a):
+    out(manager.rename(a.root, a.wiki, a.nuovo), a.json)
+
+
+def cmd_trash(a):
+    out(manager.trash_list(a.root, a.wiki), a.json)
+
+
 def cmd_export(a):
     p = manager.export(a.root, a.wiki, senza_raw=a.senza_raw)
     out({"zip": str(p)} if a.json else str(p), a.json)
@@ -85,6 +93,8 @@ def main(argv=None) -> int:
     p.set_defaults(f=cmd_review)
     p = sub.add_parser("remove"); p.add_argument("wiki"); p.add_argument("voce", nargs="?")
     p.add_argument("--confirm", action="store_true"); p.set_defaults(f=cmd_remove)
+    p = sub.add_parser("rename"); p.add_argument("wiki"); p.add_argument("nuovo"); p.set_defaults(f=cmd_rename)
+    p = sub.add_parser("trash"); p.add_argument("wiki"); p.set_defaults(f=cmd_trash)
     p = sub.add_parser("export"); p.add_argument("wiki")
     p.add_argument("--senza-raw", action="store_true"); p.set_defaults(f=cmd_export)
     p = sub.add_parser("import"); p.add_argument("file"); p.add_argument("--merge", action="store_true")

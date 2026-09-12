@@ -3,15 +3,121 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ocr-pi (u2: PWA vera qui)</title>
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.json">
+<title>ocr-pi</title>
+<style>
+  :root { --bd: #dadce0; --acc: #137333; --hl: #fff3b0; }
+  * { box-sizing: border-box; }
+  html { touch-action: manipulation; }
+  body { font-family: system-ui, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100dvh; }
+  a.skip { position: absolute; left: -999px; top: 0; background: #fff; padding: 8px; z-index: 20; }
+  a.skip:focus-visible { left: 0; }
+  button:focus-visible, input:focus-visible, a:focus-visible, select:focus-visible { outline: 3px solid #1a73e8; outline-offset: 2px; }
+  button:hover { filter: brightness(.96); }
+  @media (prefers-reduced-motion: reduce) { aside { transition: none; } }
+  header, #dock { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  #dock { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
+  header { display: flex; gap: 8px; align-items: center; padding-top: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--bd); }
+  header h1 { font-size: 16px; margin: 0; }
+  #burger { display: none; font-size: 20px; border: 1px solid var(--bd); background: #fff; border-radius: 8px; padding: 4px 10px; }
+  #localbadge { font-size: 12px; border: 1px solid var(--bd); border-radius: 12px; padding: 2px 10px; background: #e6f4ea; }
+  #work { display: flex; flex: 1; min-height: 0; }
+  aside { width: 240px; border-right: 1px solid var(--bd); overflow: auto; padding: 8px; background: #fafafa; overscroll-behavior: contain; }
+  aside h2 { font-size: 12px; text-transform: uppercase; color: #5f6368; margin: 8px 4px 4px; }
+  aside ul { list-style: none; margin: 0 0 8px; padding: 0; }
+  aside li { padding: 2px 0; font-size: 14px; }
+  aside li.sub button { all: unset; display: block; width: 100%; padding: 6px 8px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  aside li.sub button:focus-visible { outline: 3px solid #1a73e8; outline-offset: -1px; }
+  aside li.sel button { background: #e8f0fe; }
+  aside li.sub { padding-left: 14px; color: #444; }
+  #q { width: calc(100% - 16px); margin: 4px 8px; padding: 9px 10px; font-size: 15px; border: 1px solid var(--bd); border-radius: 8px; }
+  .sechead { display: flex; align-items: center; }
+  .sechead h2 { flex: 1; }
+  .iconbtn { border: 1px solid var(--bd); background: #fff; border-radius: 8px; padding: 4px 10px; font-size: 15px; }
+  #mtoast { font-size: 13px; color: var(--acc); min-height: 18px; }
+  #wikimenu { display: none; border: 1px solid var(--bd); border-radius: 8px; background: #fff; padding: 4px; margin: 0 0 8px; }
+  #wikimenu.open { display: block; }
+  #wikimenu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 9px 10px; font-size: 15px; border-radius: 6px; }
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-width: 0; }
+  .pane { padding: 10px 14px; overflow: auto; }
+  .pane.left { border-right: 1px solid var(--bd); }
+  .tabs { display: none; gap: 8px; padding: 8px 12px 0; }
+  .tabs button { flex: 1; padding: 10px; border: 1px solid var(--bd); background: #fff; border-radius: 8px; font-size: 15px; }
+  .tabs button[aria-pressed="true"] { background: #e8f0fe; border-color: #8ab4f8; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { border: 1px solid #80868b; padding: 4px 8px; text-align: left; }
+  table.hl td, table.hl th { background: var(--hl); }
+  .tablewrap { overflow-x: auto; }
+  img.doc { max-width: 100%; }
+  .toolbar { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  .toolbar button, #dock form button { border: 1px solid var(--bd); background: #fff; border-radius: 8px; padding: 8px 14px; font-size: 15px; }
+  button.primary { background: var(--acc); color: #fff; border-color: var(--acc); }
+  #optpanel { display: none; border: 1px solid var(--bd); border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-size: 14px; background: #fff; }
+  #optpanel.open { display: block; }
+  #optpanel label { display: block; margin: 6px 0; }
+  .pill { font-size: 11px; border: 1px solid #b06000; color: #b06000; border-radius: 10px; padding: 1px 8px; margin-left: 6px; }
+  #dock { border-top: 1px solid var(--bd); background: #f8f9fa; }
+  #docklog { max-height: 110px; overflow: auto; padding: 8px 12px; font-size: 14px; display: none; }
+  #dock.open #docklog { display: block; }
+  #dock form { display: flex; gap: 8px; padding: 8px 12px; }
+  #dock input { flex: 1; padding: 10px; font-size: 15px; border: 1px solid var(--bd); border-radius: 8px; }
+  #docktoggle { width: 100%; border: 0; background: none; padding: 6px; font-size: 13px; color: #5f6368; display: none; }
+  #toast { color: var(--acc); }
+  @media (max-width: 800px) {
+    #burger { display: block; }
+    aside { position: fixed; z-index: 10; top: 0; bottom: 0; left: 0; background: #fff; transform: translateX(-105%); transition: transform .2s; width: min(78vw, 300px); box-shadow: 2px 0 8px rgba(0,0,0,.15); }
+    body.nav aside { transform: none; }
+    main { grid-template-columns: 1fr; }
+    .pane.left { border-right: 0; }
+    .tabs { display: flex; }
+    main[data-tab="md"] .pane.left, main[data-tab="pdf"] .pane.right { display: none; }
+    #docktoggle { display: block; }
+    #docklog, #dock form { display: none; }
+    #dock.open #docklog, #dock.open form { display: block; }
+  }
+</style>
 </head>
 <body>
-<h1>ocr-pi</h1>
-<p>Segnaposto u1: la PWA vera dal mock arriva con [u2]. API attive:</p>
-<ul>
-<li><code>GET /api/wikis</code></li>
-<li><code>POST /api/convert</code></li>
-<li><code>POST /api/chat</code> (echo fino a u3)</li>
-</ul>
+<a class="skip" href="#split">Salta al contenuto</a>
+<header>
+  <button id="burger" aria-label="menu">☰</button>
+  <h1>ocr-pi</h1>
+  <span id="localbadge" title="tutto gira su questa macchina">● solo locale</span>
+  <label style="font-size:13px">Converti <input type="file" id="upick" accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.gif,.bmp" aria-label="scegli file da convertire"></label>
+</header>
+<div id="work">
+  <aside id="side" aria-label="dizionari">
+    <input id="q" name="cerca" autocomplete="off" placeholder="es. cerca iva…" aria-label="cerca nelle wiki">
+    <h2>Folder</h2>
+    <ul id="folder"></ul>
+    <div class="sechead"><h2>Wiki</h2><button class="iconbtn" id="wikimenubtn" aria-label="menu wiki" aria-expanded="false">⋯</button></div>
+    <div id="mtoast" role="status"></div>
+    <div id="wikimenu" role="menu">
+      <button data-m="export">Esporta zip</button>
+      <button data-m="export-slim">Esporta senza originali</button>
+      <button data-m="import">Importa zip…</button>
+      <button data-m="rename">Rinomina…</button>
+      <button data-m="new">Nuova wiki…</button>
+    </div>
+    <ul id="wikis"></ul>
+    <h2>Altro</h2>
+    <ul><li class="sub" id="trashli">Cestino (<span id="trashn">0</span>)</li></ul>
+  </aside>
+  <main id="split" data-tab="pdf">
+    <div class="tabs" role="tablist">
+      <button id="tPdf" aria-pressed="true">Originale</button>
+      <button id="tMd" aria-pressed="false">Convertito</button>
+    </div>
+    <section class="pane left" aria-label="originale"><div id="orig">Scegli una voce dalla sidebar.</div></section>
+    <section class="pane right" aria-label="convertito"><div id="conv">—</div></section>
+  </main>
+</div>
+<section id="dock">
+  <button id="docktoggle">▲ agente pi</button>
+  <div id="docklog" aria-live="polite"><div><b>pi:</b> chiedimi ad es. <i>cerca iva</i> (dock collegato in u3)</div></div>
+  <form id="dockform"><input id="dockin" name="comando" autocomplete="off" placeholder="es. cerca iva…" aria-label="comando per l'agente"><button class="primary">Invia</button></form>
+</section>
+<script src="app.js"></script>
 </body>
 </html>

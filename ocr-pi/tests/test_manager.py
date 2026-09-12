@@ -59,6 +59,14 @@ class ManagerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             manager.add(self.root, "s", md, title="Nota")
 
+    def test_rename_e_trash_list(self):
+        manager.rename(self.root, 's', 'Nuova Wiki')
+        self.assertEqual(manager.list_wikis(self.root), [{'slug': 'nuova-wiki', 'voci': 1}])
+        with self.assertRaises(ValueError):
+            manager.rename(self.root, 'nuova-wiki', 'nuova-wiki')
+        manager.remove(self.root, 'nuova-wiki', 'Fattura')
+        self.assertEqual(manager.trash_list(self.root, 'nuova-wiki'), ['fattura.md'])
+
     def test_remove_voce_in_trash(self):
         r = manager.remove(self.root, "s", "Fattura")
         self.assertTrue(r["trash"])

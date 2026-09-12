@@ -1,0 +1,10 @@
+{
+  "name": "ocr-pi",
+  "short_name": "ocr-pi",
+  "description": "Converti documenti in Markdown e gestisci dizionari wiki. Tutto in locale.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

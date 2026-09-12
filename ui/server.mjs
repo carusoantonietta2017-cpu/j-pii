@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -112,13 +112,50 @@ export function createApp() {
 				return send(res, 200, await cli(["list"]));
 			}
 
-			// GET /api/wiki/:slug  (dettaglio: lista filtrata)
+			// GET /api/wiki/:slug  (dettaglio: meta + cestino + originali)
 			if (req.method === "GET" && seg[0] === "api" && seg[1] === "wiki" && seg.length === 3) {
 				const slug = decodeURIComponent(seg[2]);
-				const all = await cli(["list"]);
-				const found = all.find((w) => w.slug === slug);
-				if (!found) return send(res, 404, { error: `wiki assente: ${slug}` });
-				return send(res, 200, found);
+				const dir = join(config.wikiRoot, "wiki", slug);
+				let meta;
+				try {
+					meta = JSON.parse(await readFile(join(dir, "meta.json"), "utf-8"));
+				} catch {
+					return send(res, 404, { error: `wiki assente: ${slug}` });
+				}
+				const ls = async (sub) => {
+					try {
+						return (await readdir(join(dir, sub))).filter((f) => f.endsWith(".md") || f.endsWith(".pdf") || f.endsWith(".png"));
+					} catch {
+						return [];
+					}
+				};
+				return send(res, 200, { slug, docs: meta.docs ?? [], trash: await ls("trash"), raw: await ls("raw") });
+			}
+
+			// GET /api/wiki/:slug/file?path=doc/x.md  (confinato alla wiki)
+			if (req.method === "GET" && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "file") {
+				const dir = join(config.wikiRoot, "wiki", decodeURIComponent(seg[2]));
+				const rel = (url.searchParams.get("path") ?? "").replace(/\\/g, "/");
+				const file = normalize(join(dir, rel));
+				if (rel.includes("..") || (file !== dir && !file.startsWith(dir + sep))) {
+					return send(res, 403, { error: "fuori dalla wiki" });
+				}
+				try {
+					if (!(await stat(file)).isFile()) return send(res, 404, { error: "non trovato" });
+					const ext = extname(file);
+					res.writeHead(200, { "Content-Type": MIME[ext] ?? "application/octet-stream" });
+					return res.end(await readFile(file));
+				} catch {
+					return send(res, 404, { error: "non trovato" });
+				}
+			}
+
+			// GET /api/wiki/:slug/export.zip[?senza_raw=1]  (download)
+			if (req.method === "GET" && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "export.zip") {
+				const slug = decodeURIComponent(seg[2]);
+				const out = await cli(["export", slug, ...(url.searchParams.get("senza_raw") ? ["--senza-raw"] : [])]);
+				res.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${slug}.zip"` });
+				return res.end(await readFile(out.zip));
 			}
 
 			// GET /api/wiki/:slug/search?q=&stato=
@@ -147,12 +184,47 @@ export function createApp() {
 				return send(res, 200, result);
 			}
 
+			// POST /api/wiki {slug}  (nuova wiki)
+			if (req.method === "POST" && url.pathname === "/api/wiki") {
+				const body = JSON.parse((await readBody(req)) || "{}");
+				if (!body.slug) return send(res, 400, { error: "manca slug" });
+				return send(res, 200, await cli(["create", body.slug]));
+			}
+
+			// POST /api/convert-upload {name, dataBase64, engine?, pages?, deskew?}
+			if (req.method === "POST" && url.pathname === "/api/convert-upload") {
+				const body = JSON.parse((await readBody(req, 64 * 1024 * 1024)) || "{}");
+				if (!body.name || !body.dataBase64) return send(res, 400, { error: "servono name e dataBase64" });
+				const dir = mkdtempSync(join(tmpdir(), "ocr-pi-up-"));
+				const src = join(dir, body.name.replace(/[^\w.\-]+/g, "_"));
+				writeFileSync(src, Buffer.from(body.dataBase64, "base64"));
+				const result = await daemon.convert(
+					{ path: src, engine: body.engine ?? "docling", pages: body.pages ?? null, workdir: dir, deskew: !!body.deskew },
+					process.cwd(),
+				);
+				const assets = [];
+				for (const a of result.assets ?? []) {
+					try {
+						assets.push({ name: String(a).split("/").pop(), dataBase64: (await readFile(String(a))).toString("base64") });
+					} catch {
+						/* asset mancante: salta */
+					}
+				}
+				return send(res, 200, { ...result, assets });
+			}
+
 			// POST /api/wiki/:slug/{add,review,remove,export} | POST /api/wiki/import
 			if (req.method === "POST" && seg[0] === "api" && seg[1] === "wiki") {
 				const body = JSON.parse((await readBody(req)) || "{}");
 				if (seg[2] === "import" && seg.length === 3) {
-					if (!body.file) return send(res, 400, { error: "manca file zip" });
-					return send(res, 200, await cli(["import", body.file, ...(body.merge ? ["--merge"] : [])]));
+					let file = body.file ?? "";
+					if (!file && body.name && body.dataBase64) {
+						const dir = mkdtempSync(join(tmpdir(), "ocr-pi-imp-"));
+						file = join(dir, body.name);
+						writeFileSync(file, Buffer.from(body.dataBase64, "base64"));
+					}
+					if (!file) return send(res, 400, { error: "manca file zip" });
+					return send(res, 200, await cli(["import", file, ...(body.merge ? ["--merge"] : [])]));
 				}
 				if (seg.length !== 4) return send(res, 404, { error: "rotta sconosciuta" });
 				const slug = decodeURIComponent(seg[2]);
@@ -161,6 +233,11 @@ export function createApp() {
 					let file = body.file ?? "";
 					if (!file && body.markdown) {
 						const dir = mkdtempSync(join(tmpdir(), "ocr-pi-add-"));
+						for (const a of body.assets ?? []) {
+							if (a.name && a.dataBase64) {
+								writeFileSync(join(dir, a.name.replace(/[^\w.\-]+/g, "_")), Buffer.from(a.dataBase64, "base64"));
+							}
+						}
 						file = join(dir, "voce.md");
 						writeFileSync(file, body.markdown);
 					}
@@ -179,6 +256,10 @@ export function createApp() {
 				}
 				if (op === "export") {
 					return send(res, 200, await cli(["export", slug, ...(body.senza_raw ? ["--senza-raw"] : [])]));
+				}
+				if (op === "rename") {
+					if (!body.nuovo) return send(res, 400, { error: "manca nuovo nome" });
+					return send(res, 200, await cli(["rename", slug, body.nuovo]));
 				}
 				return send(res, 404, { error: "rotta sconosciuta" });
 			}

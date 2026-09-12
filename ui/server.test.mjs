@@ -33,7 +33,7 @@ const j = async (path, opts = {}) => {
 test("static placeholder", async () => {
 	const r = await fetch(base + "/");
 	assert.equal(r.status, 200);
-	assert.ok((await r.text()).includes("u2"));
+	assert.ok((await r.text()).includes("dockform"));
 });
 
 test("404 rotta + traversal static", async () => {
@@ -69,6 +69,40 @@ test("convert fake via demone", async () => {
 	assert.equal(r.status, 200);
 	assert.ok(r.body.markdown.includes("|"));
 	assert.equal(r.body.engine, "fake");
+});
+
+test("dettaglio wiki, file confinato, export.zip, rename", async () => {
+	const d = await j("/api/wiki/demo");
+	assert.equal(d.status, 200);
+	assert.equal(d.body.docs.length, 1);
+	assert.equal(d.body.docs[0].review, "reviewed");
+	const f = await j("/api/wiki/demo/file?path=" + encodeURIComponent(d.body.docs[0].file));
+	assert.equal(f.status, 200);
+	assert.ok(f.body.markdown === undefined); // raw servito: testo grezzo
+	const trav = await j("/api/wiki/demo/file?path=" + encodeURIComponent("../../x"));
+	assert.equal(trav.status, 403);
+	const r = await j("/api/wiki/demo/rename", { method: "POST", body: JSON.stringify({ nuovo: "Demo Nuova" }) });
+	assert.equal(r.body.slug, "demo-nuova");
+	const z = await fetch(base + "/api/wiki/demo-nuova/export.zip");
+	assert.equal(z.status, 200);
+	assert.ok((z.headers.get("content-type") ?? "").includes("zip"));
+});
+
+test("create + export.zip download", async () => {
+	const c = await j("/api/wiki", { method: "POST", body: JSON.stringify({ slug: "Seconda" }) });
+	assert.equal(c.status, 200);
+	const z = await fetch(base + "/api/wiki/seconda/export.zip");
+	assert.equal(z.status, 200);
+	assert.ok((z.headers.get("content-type") ?? "").includes("zip"));
+});
+
+test("convert-upload fake + add con assets", async () => {
+	const tiny = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64").toString("base64");
+	const up = await j("/api/convert-upload", { method: "POST", body: JSON.stringify({ name: "x.png", dataBase64: tiny, engine: "fake" }) });
+	assert.equal(up.status, 200);
+	assert.ok(up.body.markdown.includes("|"));
+	const add = await j("/api/wiki/demo-nuova/add", { method: "POST", body: JSON.stringify({ markdown: up.body.markdown, title: "Conv", assets: up.body.assets }) });
+	assert.equal(add.body.review, "draft");
 });
 
 test("chat echo SSE", async () => {

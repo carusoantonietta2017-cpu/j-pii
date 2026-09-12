@@ -182,6 +182,30 @@ def export(root, wiki: str, senza_raw=False) -> Path:
     return export_wiki(_require_wiki(root, wiki), senza_raw=senza_raw)
 
 
+def rename(root, wiki: str, nuovo: str) -> dict:
+    d = _require_wiki(root, wiki)
+    slug = slugify(nuovo)
+    if not slug:
+        raise ValueError('nome vuoto')
+    dest = _root(root) / 'wiki' / slug
+    if dest.exists():
+        raise ValueError(f'wiki esistente: {slug} (non sovrascrivo)')
+    import json
+    meta = json.loads((d / 'meta.json').read_text(encoding='utf-8'))
+    meta['slug'] = slug
+    (d / 'meta.json').write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding='utf-8')
+    d.rename(dest)
+    return {'slug': slug}
+
+
+def trash_list(root, wiki: str) -> list:
+    d = _require_wiki(root, wiki)
+    tdir = d / 'trash'
+    if not tdir.exists():
+        return []
+    return sorted(x.name for x in tdir.glob('*.md'))
+
+
 def import_wiki(root, zip_path, merge=False) -> dict:
     """Importa zip wiki. Slug esistente -> errore senza merge; conflitti voce -> skip + report."""
     root = _root(root)
