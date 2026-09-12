@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anteprima conversione — fattura_001.pdf (demo throwaway)</title>
+<style>
+  :root { --hl: #fff3b0; --ok: #137333; --bd: #dadce0; }
+  body { font-family: system-ui, sans-serif; margin: 0; color: #202124; }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--bd); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge { border: 1px solid var(--bd); border-radius: 12px; padding: 2px 10px; font-size: 12px; background: #f8f9fa; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: 60vh; }
+  section { padding: 12px 16px; }
+  section.left { border-right: 1px solid var(--bd); background: #fafafa; }
+  .toolbar { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  button { border: 1px solid var(--bd); background: #fff; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button[aria-pressed="true"] { background: #e8f0fe; border-color: #8ab4f8; }
+  button.primary { background: var(--ok); color: #fff; border-color: var(--ok); }
+  #scan { background: #fff; border: 1px solid var(--bd); padding: 12px; transition: transform .2s, filter .2s; transform-origin: 50% 20%; }
+  #scan.warped { transform: perspective(700px) rotateX(9deg) rotateY(-11deg) rotateZ(2deg) scale(.96); filter: blur(.4px) brightness(.97); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { border: 1px solid #80868b; padding: 4px 8px; text-align: left; }
+  table.hl td, table.hl th { background: var(--hl); }
+  code.ref { background: #f1f3f4; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  footer { border-top: 1px solid var(--bd); padding: 12px 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #toast { margin-left: auto; font-size: 13px; color: var(--ok); }
+  .q { background: #fef7e0; border: 1px solid #fde293; border-radius: 8px; padding: 8px 12px; margin: 12px 16px; font-size: 14px; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } section.left { border-right: 0; border-bottom: 1px solid var(--bd); } }
+</style>
+</head>
+<body>
+<header>
+  <strong>fattura_001.pdf</strong><span class="badge">p. 1 di 1</span>
+  <span class="badge">modello: Docling (default)</span>
+  <span class="badge">2,3 s/pagina CPU (placeholder)</span>
+  <span class="badge">classe: pdf-nativo IT</span>
+</header>
+
+<div class="q">Demo throwaway: niente OCR vero. I toggle simulano <b>storta</b>, <b>Mask j-pii</b> ed <b>evidenza tabelle</b>. Dimmi cosa tenere/cambiare (vedi README).</div>
+
+<main>
+  <section class="left">
+    <h2>Originale</h2>
+    <div class="toolbar">
+      <button id="bStraight" aria-pressed="true">Dritta</button>
+      <button id="bWarped" aria-pressed="false">Storta (simulata)</button>
+    </div>
+    <div id="scan" aria-label="simulazione scansione">
+      <svg viewBox="0 0 400 220" width="100%" role="img" aria-label="tabella fattura simulata">
+        <rect x="8" y="8" width="384" height="204" fill="#fff" stroke="#80868b"/>
+        <text x="18" y="32" font-size="13" font-weight="bold">Fattura 001 (sintetica)</text>
+        <g font-size="11">
+          <rect x="18" y="44" width="364" height="22" fill="#f1f3f4" stroke="#80868b"/>
+          <text x="26" y="59">Riga | Descrizione | Qta | Prezzo EUR</text>
+          <rect x="18" y="66" width="364" height="22" fill="#fff" stroke="#80868b"/>
+          <text x="26" y="81">1 | Consulenza privacy GDPR | 2 | 180.00</text>
+          <rect x="18" y="88" width="364" height="22" fill="#fff" stroke="#80868b"/>
+          <text x="26" y="103">2 | Redazione informativa | 1 | 120.00</text>
+          <rect x="18" y="110" width="364" height="22" fill="#fff" stroke="#80868b"/>
+          <text x="26" y="125">3 | Rimborso spese | 1 | 25.50</text>
+          <text x="18" y="150">Cliente fittizio: Mario Rossi</text>
+          <text x="18" y="166" id="cfSvg">CF RSSMRA00A01H501U</text>
+          <text x="18" y="182">mario.rossi@example.invalid</text>
+        </g>
+      </svg>
+    </div>
+    <p><code class="ref">raw/fattura_001.pdf</code> — l'agente può aprire originale + md insieme.</p>
+  </section>
+
+  <section>
+    <h2>Markdown estratto</h2>
+    <div class="toolbar">
+      <button id="bHl" aria-pressed="true">Evidenzia tabelle</button>
+      <button id="bMask" aria-pressed="false">Mostra Mask j-pii</button>
+    </div>
+    <p><code class="ref">![tabella fattura](assets/fattura_001_p1.png)</code></p>
+    <table id="mdTable" class="hl">
+      <tr><th>Riga</th><th>Descrizione</th><th>Qta</th><th>Prezzo EUR</th></tr>
+      <tr><td>1</td><td>Consulenza privacy GDPR</td><td>2</td><td>180.00</td></tr>
+      <tr><td>2</td><td>Redazione informativa</td><td>1</td><td>120.00</td></tr>
+      <tr><td>3</td><td>Rimborso spese</td><td>1</td><td>25.50</td></tr>
+    </table>
+    <p id="piiLine">Cliente fittizio: Mario Rossi — CF <span id="cfVal">RSSMRA00A01H501U</span> — mario.rossi@example.invalid.</p>
+  </section>
+</main>
+
+<footer>
+  <label><input type="checkbox" checked> tabelle ok</label>
+  <label><input type="checkbox" checked> figure ok</label>
+  <label><input type="checkbox"> testo ok</label>
+  <button class="primary" data-act="Approvata (demo)">Approva</button>
+  <button data-act="Correzione tabella registrata (demo)">Correggi tabella</button>
+  <button data-act="Segnalazione PII registrata (demo)">Segnala PII</button>
+  <span id="toast" role="status"></span>
+</footer>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const scan = $('scan');
+  const setPressed = (on, off) => { $(on).setAttribute('aria-pressed','true'); $(off).setAttribute('aria-pressed','false'); };
+  $('bWarped').onclick = () => { scan.classList.add('warped'); setPressed('bWarped','bStraight'); };
+  $('bStraight').onclick = () => { scan.classList.remove('warped'); setPressed('bStraight','bWarped'); };
+  $('bHl').onclick = e => { const b = e.currentTarget; const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', on); $('mdTable').classList.toggle('hl', on); };
+  const REAL_CF = 'RSSMRA00A01H501U';
+  $('bMask').onclick = e => {
+    const b = e.currentTarget; const on = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', on);
+    $('cfVal').textContent = on ? '[CF_1]' : REAL_CF;           // Mask/Restore demo (vocabolario CONTEXT.md)
+    $('cfSvg').textContent = 'CF ' + (on ? '[CF_1]' : REAL_CF);
+  };
+  document.querySelectorAll('footer button').forEach(b => b.onclick = () => { $('toast').textContent = b.dataset.act; });
+</script>
+</body>
+</html>
