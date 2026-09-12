@@ -1,126 +1,151 @@
-# j-pii
+# j-pii + ocr-pi — guida utente
 
-j-pii è un **filtro privacy per l'agente pi**: ogni testo diretto all'LLM (i tuoi prompt, i file che l'agente legge) viaggia con **segnaposto** tipo `[CF_1]` al posto dei dati veri. I valori reali restano solo sul tuo computer, in una mappa di sessione che non viene mai salvata né inviata, e vengono **ripristinati** nelle risposte e nei file che l'agente scrive.
+Due strumenti che lavorano insieme dentro l'agente **pi**:
 
-Il riconoscimento dei dati sensibili è di [rizzo-pii](https://github.com/Rizzo-AI-Academy/rizzo-pii) (italiano, 22 categorie: codice fiscale, P.IVA, IBAN, nomi, email...), eseguito **in locale** sulla tua CPU.
+- **j-pii** — il buttadifuori della privacy: maschera i dati sensibili prima che arrivino all'LLM e li ripristina nelle risposte. I valori veri non lasciano mai il tuo computer.
+- **ocr-pi** — il convertitore di documenti: trasforma immagini e PDF in Markdown con tabelle (anche storte), li organizza in dizionari wiki consultabili e li rende usabili dall'agente.
 
-## Installazione (una volta sola)
+Questa guida spiega tutto in parole semplici, passo passo.
 
-Requisiti: Node 22+, Python 3.11+.
+---
+
+## 1. Requisiti
+
+- Node 22+
+- Python 3.11+
+- L'agente `pi` installato
+- Spazio disco (~4 GB per i modelli, scaricati una volta sola)
+
+## 2. Installazione (una volta sola)
 
 ```bash
 # 1. Dipendenze dell'extension
 cd extension && npm install && cd ..
 
-# 2. Ambiente Python del sidecar (solo CPU, niente GPU)
+# 2. Ambiente Python per OCR e privacy (solo CPU, niente GPU)
+python3 -m venv ocr-pi/.venv
+ocr-pi/.venv/bin/pip install docling pillow opencv-python-headless mcp pymupdf
 python3 -m venv .venv
 .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
 .venv/bin/pip install transformers flask pymupdf huggingface_hub
 
-# 3. Pesi del modello (~1.2 GB, scaricati una volta)
+# 3. Pesi del modello privacy (~1.2 GB, una volta sola)
 .venv/bin/hf download rizzoaiacademy/rizzo-pii-0.3B --revision v1.5.0 \
   --local-dir rizzo-pii/models/rizzo-pii-0.3B-v1.5.0
 ```
 
-Verifica così:
+I modelli OCR si scaricano da soli alla prima conversione. Pesi e file
+scaricati non finiscono mai nel repo.
+
+## 3. Avvio
 
 ```bash
-ls rizzo-pii/models/rizzo-pii-0.3B-v1.5.0/ && .venv/bin/python -c "import torch, transformers, flask; print('deps ok')"
+JPII_ANALYZER=fake JPII_PYTHON=.venv/bin/python pi \
+  --provider opencode --model muse-spark-1.3-contributor-free \
+  -e ./extension/j-pii.ts -e ./extension/ocr-pi.ts
 ```
 
-## Avvio
+La prima conversione impiega qualche minuto (carica i modelli), poi è veloce.
+Per una prova senza modello privacy: `JPII_ANALYZER=fake` riconosce solo
+codice fiscale ed email, ma il giro completo funziona.
+
+---
+
+## 4. j-pii: la privacy automatica
+
+Non devi fare niente: ogni testo diretto all'LLM (i tuoi prompt, i file che
+l'agente legge) viaggia con segnaposto tipo `[CF_1]` al posto dei dati veri.
+Nelle risposte e nei file scritti ritrovi i valori veri.
+
+Tre prove:
+
+- **A (silenzioso):** `Codice fiscale RSSMRA80A01H501U: elenca il segnaposto che vedi.`
+- **B (revisione umana):** `Riepiloga questo: Mario Rossi, codice fiscale RSSMRA80A01H501U`
+  → per i casi dubbi compare `Mask it / Send in clear`: scegli tu, se ignori
+  la richiesta viene bloccata invece di far passare dati.
+- **C (file scritti):** fai scrivere un file con un codice fiscale e verifica
+  che su disco ci sia il valore vero (l'LLM ha maneggiato solo `[CF_1]`).
+
+Garanzie: la mappa segnaposto→valore non lascia mai la macchina, niente su
+disco, cancellata a fine sessione. Qualsiasi errore blocca invece di far passare dati.
+
+---
+
+## 5. ocr-pi: convertire immagini e PDF
+
+### 5.1 Le due domande (hook)
+
+Quando alleghi un'immagine (trascinala nel terminale, incollala, o citala con
+`@/percorso/immagine.png`), prima che parta qualsiasi cosa ti vengono fatte
+**due domande, una sola volta per sessione**:
+
+1. **Usare l'OCR locale?** — Sì = converte in Markdown sul tuo computer.
+   No = invia l'immagine originale al provider (con avviso).
+2. **Contiene dati sensibili?** — Sì = il testo estratto passa per j-pii
+   (mascherato verso l'LLM). No = testo in chiaro, ma solo per quel documento.
+
+Se chiudi le domande senza rispondere, o non c'è interfaccia, la richiesta
+viene **bloccata** (mai invii silenziosi). File non validi vengono saltati
+con avviso chiaro.
+
+### 5.2 Dizionari wiki: i tuoi archivi consultabili
+
+Una wiki è una cartella con i documenti trascritti, un indice, le immagini e
+una `SKILL.md` che spiega all'agente quando usarla. Comandi base:
 
 ```bash
-JPII_PYTHON=.venv/bin/python pi --provider opencode --model muse-spark-1.3-contributor-free -e ./extension/j-pii.ts
+python3 ocr-pi/cli.py --root ~/wiki create fatture
+python3 ocr-pi/cli.py --root ~/wiki add fatture documento.md --titolo Voce
+python3 ocr-pi/cli.py --root ~/wiki search iva --stato draft
+python3 ocr-pi/cli.py --root ~/wiki review fatture Voce reviewed
+python3 ocr-pi/cli.py --root ~/wiki export fatture [--senza-raw]
+python3 ocr-pi/cli.py --root ~/wiki import fatture.zip [--merge]
+python3 ocr-pi/cli.py --root ~/wiki remove fatture Voce   # va nel cestino
 ```
 
-Il modello si carica da solo alla prima chiamata che lo richiede (**~10-15 secondi una volta sola**, poi ~1 secondo a lettura). Se serve solo una prova senza modello:
+Regole d'oro: tutto nasce `draft` (bozza), si esporta solo ciò che è
+`reviewed` (verificato); le eliminazioni vanno nel cestino; gli import non
+sovrascrivono mai in silenzio (conflitti saltati + segnalati).
+
+### 5.3 MCP: i comandi per l'agente
+
+Lo stesso di sopra, ma per l'agente invece che per te: 9 comandi
+(`ocr_convert`, `wiki_list/search/get/add/review/remove/export/import`).
+L'agente converte e archivia da solo quando glielo chiedi.
+
+### 5.4 Anteprima: vedi prima di fidarti
 
 ```bash
-JPII_ANALYZER=fake pi ... -e ./extension/j-pii.ts
+python3 ocr-pi/preview.py --pdf scan.pdf --engine docling --wiki-root ~/wiki --slug demo --out prev-out
 ```
 
-(con `fake` riconosce solo codice fiscale ed email, ma il giro completo funziona).
+Apre originale e Markdown fianco a fianco, con tabelle evidenziate,
+interruttore Mask e pulsanti Approva/Rimanda collegati alla wiki.
 
-## Le tre prove
+---
 
-### Prova A — mascheramento silenzioso
+## 6. Se qualcosa non va
 
-> `Codice fiscale RSSMRA80A01H501U: elenca il segnaposto che vedi.`
+| Sintomo | Cosa fare |
+|---|---|
+| Prima conversione lentissima | Normale: carica i modelli una volta sola (~2 min), poi è veloce |
+| `j-pii blocked ... review dismissed` | C'era un caso dubbio e non hai confermato: rispondi al prompt |
+| `ocr-pi blocked ...` | Hai chiuso le domande senza rispondere: riprova e rispondi |
+| `salto ... (non è un'immagine valida)` | Il file non è un'immagine leggibile: controlla il file |
+| Troppe richieste di revisione | Allarga `JPII_EXCLUDE_TAGS=DATE,TIME,BUILDINGNUM,AGE` |
+| `ModuleNotFoundError` | Usa il python del venv giusto (`ocr-pi/.venv/bin/python`) |
 
-Il codice fiscale è un rilevamento sicuro: parte senza chiedere niente. Nella risposta vedi il valore vero — sull'wire c'era solo `[CF_1]`.
+Log utili: `/tmp/ocr-pi-daemon.log` (demone converter),
+`/tmp/jpii-payload.log` (cosa riceve davvero l'LLM, con extension debug).
 
-> Consiglio: frasi secche tipo *"elenca i segnaposto, uno per riga, senza commenti"*. Se chiedi cose vaghe, l'agente parte a cercare nel repo e sembra tutto lento (è lui che esplora, non j-pii).
-
-### Prova B — revisione umana (il cuore)
-
-> `Riepiloga questo: Mario Rossi, codice fiscale RSSMRA80A01H501U`
-
-Il codice fiscale va via liscio, ma per `Mario Rossi` (rilevamento non verificato) compare:
-
-> `j-pii doubtful FULLNAME: "Mario Rossi" — mask it?` → `[Mask it] / [Send in clear]`
-
-Scegli tu: **Mask it** lo maschera e ricorda la scelta per la sessione; **Send in clear** lo manda in chiaro con avviso esplicito; se ignori il prompt, la richiesta viene **bloccata** invece di far passare dati.
-
-### Prova C — file scritti
-
-> `Scrivi con lo strumento write nel file /tmp/demo-letter.txt la riga: codice fiscale RSSMRA80A01H501U. Non aggiungere altro testo.`
-
-L'agente risponde `Fatto` e su disco trovi il valore vero:
+## 7. Per sviluppatori
 
 ```bash
-cat /tmp/demo-letter.txt
-# codice fiscale RSSMRA80A01H501U.
+python3 -m unittest discover -s ocr-pi/tests -t .   # test rapidi (fake)
+ocr-pi/.venv/bin/python -m unittest discover -s ocr-pi/tests -t .  # tutti
+python3 bench/run.py --engine fake                   # benchmark senza modelli
+cd extension && node --test && npx tsc --noEmit      # test + tipi
 ```
 
-L'LLM ha maneggiato solo `[CF_1]`: i valori veri non escono mai.
-
-## Vedere con i tuoi occhi cosa riceve l'LLM
-
-Aggiungi l'extension di debug (solo sviluppo, mai spedita):
-
-```bash
-pi -e ./extension/j-pii.ts -e ./extension/debug-payload.ts ... (resto uguale)
-```
-
-poi apri `/tmp/jpii-payload.log`: una riga per messaggio, già mascherato. Esempio reale:
-
-```
-[user] Dato [CF_1], dimmi ok.
-```
-
-Cerca i tuoi dati con `grep`: se trovi solo `[XXX_N]`, è tutto a posto. La dashboard del provider (es. OpenRouter → activity) mostra gli stessi testi: è la controprova indipendente.
-
-## Configurazione (variabili d'ambiente)
-
-| Variabile | Default | Cosa fa |
-|---|---|---|
-| `JPII_ANALYZER` | `real` | `fake` = prova senza modello (solo CF + email) |
-| `JPII_PYTHON` | `python3` | Interprete per il sidecar (es. `.venv/bin/python`) |
-| `JPII_SIDECAR_PORT` | `5005` | Porta del sidecar (`JPII_SIDECAR_URL` la sostituisce) |
-| `JPII_MODEL_DIR` | auto (`rizzo-pii/models/...`) | Cartella del modello per il sidecar |
-| `JPII_EXCLUDE_TAGS` | _(nessuna)_ | Allowlist, es. `DATE,TIME,BUILDINGNUM,AGE` |
-
-Parti consigliati: `JPII_EXCLUDE_TAGS=DATE,TIME,BUILDINGNUM,AGE` — il modello segnala aggressivamente orari, PID e frammenti numerici; con l'allowlist restano fuori e i casi veri passano lisci.
-
-## Garanzie privacy
-
-- La mappa segnaposto→valore **non lascia mai la macchina**: nessun valore vero in rete (test automatico permanente), niente su disco, isolata per sessione e cancellata all'uscita.
-- I casi dubbi **fermano la richiesta** e chiedono a te; mai passaggio silenzioso.
-- Qualsiasi errore di mascheramento **blocca** (al provider arriva un payload vuoto, rifiutato) — mai il testo originale.
-- Vengono mascherati solo i tuoi prompt e i risultati dei tool; prompt di sistema, nomi dei tool e cronologia assistente restano intatti.
-
-## Se qualcosa non va
-
-- **Prima risposta lentissima**: normale, carica il modello (~10-15 s una volta sola).
-- **`j-pii blocked ... review dismissed`**: c'era uno span dubbio e il prompt di scelta non è stato confermato (in modalità non interattiva non si può scegliere: blocca sempre).
-- **`Model is not supported` dal provider**: quasi sempre è il blocco qui sopra (payload svuotato e rifiutato). Leggi la riga `j-pii blocked` subito sopra: dice il perché e quali span l'hanno fermata.
-- **Troppe richieste di revisione**: allarga `JPII_EXCLUDE_TAGS`; le scelte restano comunque memorizzate per la sessione.
-
-## Sviluppo
-
-```bash
-cd extension && node --test && npx tsc --noEmit
-```
-
-TDD sul nucleo `mask()`/`restore()` con analyzer iniettati; wiring degli hook verificato live. Vocabolario in `CONTEXT.md`, config agenti in `AGENTS.md`.
+Dettagli tecnici (architettura, decisioni, benchmark): `docs/research/`,
+`bench/corpus/`, issue tracker GitHub.
