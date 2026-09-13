@@ -1076,30 +1076,38 @@ function initDockMode() {
 /* ---------- settings + wizard WP5 ---------- */
 async function openSettingsDialog() {
   const o = opts();
-  setTimeout(() => {
-    try {
-      const t = document.querySelector("#dlgbody #s-theme"); if (t) t.value = document.documentElement.dataset.theme || "light";
-      const e = document.querySelector("#dlgbody #s-engine"); if (e) e.value = o.engine || "docling";
-      const pg = document.querySelector("#dlgbody #s-pages"); if (pg) pg.value = o.pages || "";
-      const dk = document.querySelector("#dlgbody #s-deskew"); if (dk) dk.checked = !!o.deskew;
-    } catch {}
-  }, 0);
-  const theme = document.documentElement.dataset.theme || "light";
-  let cfg = {};
-  try { cfg = await api("/api/config"); } catch {}
-  let st = {};
-  try { st = await api("/api/status"); } catch {}
-  const v = await openDialog({
+  const pr = openDialog({
     title: "Impostazioni",
     bodyHTML: `<div class="field"><span><label for="s-theme">Tema</label></span><select id="s-theme"><option value="light">Chiaro</option><option value="dark">Scuro</option></select></div>
       <div class="field"><span><label for="s-engine">Motore OCR default</label></span><select id="s-engine"><option>docling</option><option>fake</option></select><span class="hint">Vale per upload, sorgenti e raw. I modelli restano locali.</span></div>
       <div class="field"><span><label for="s-pages">Pagine default</label></span><input id="s-pages" autocomplete="off" placeholder="Tutte, es. 1-3"></div>
       <div class="field"><label><span><input type="checkbox" id="s-deskew"> Raddrizza foto storte di default</span></label></div>
-      <p class="hint">Modello dock: <code>${esc(cfg.model || "?")}</code> · Cartella lavoro: <code>${esc(st.wikiRoot || cfg.wikiRoot || "?")}</code>${st.needsSetup ? ` · <b>da configurare</b>` : ""}</p>
-      <p class="hint">Pronto: demone ${st.daemonOk ? "✅" : "…"} · sidecar ${st.sidecarOk ? `✅ ${esc(st.sidecarEngine || "")}` : "…"} (warmup preventivo best-effort, mai bloccante)</p>
+      <p class="hint" id="s-status">Carico stato…</p>
+      <p class="hint" id="s-ocr">Modelli OCR: … <button class="mini" id="s-warm" type="button">Precarica ora</button></p>
       <p class="hint">Falsi positivi PII (es. DATE nei nomi file)? Avvia con <code>JPII_EXCLUDE_TAGS=DATE,TIME,BUILDINGNUM,AGE,ZIPCODE</code>.</p>`,
     actions: [{ label: "Annulla", value: null }, { label: "Salva", kind: "primary", value: "save" }],
   });
+  // apri subito, riempi stato in background (mai dialog bloccato)
+  setTimeout(async () => {
+    try {
+      const t = document.querySelector("#dlgbody #s-theme"); if (t) t.value = document.documentElement.dataset.theme || "light";
+      const e = document.querySelector("#dlgbody #s-engine"); if (e) e.value = o.engine || "docling";
+      const pg = document.querySelector("#dlgbody #s-pages"); if (pg) pg.value = o.pages || "";
+      const dk = document.querySelector("#dlgbody #s-deskew"); if (dk) dk.checked = !!o.deskew;
+      const [cfg, st] = await Promise.all([api("/api/config").catch(() => ({})), api("/api/status").catch(() => ({}))]);
+      const el = document.querySelector("#dlgbody #s-status");
+      if (el) el.innerHTML = `Modello dock: <code>${esc(cfg.model || "?")}</code> · Cartella lavoro: <code>${esc(st.wikiRoot || cfg.wikiRoot || "?")}</code>${st.needsSetup ? ` · <b>da configurare</b>` : ""} · demone ${st.daemonOk ? "✅" : "…"} · sidecar ${st.sidecarOk ? `✅ ${esc(st.sidecarEngine || "")}` : "… "}`;
+      paintOcrState(st);
+      const w = document.querySelector("#dlgbody #s-warm");
+      if (w) w.onclick = async () => {
+        w.disabled = true; w.textContent = "Precarico…";
+        try { await post("/api/warmup-ocr", {}); toast("Precarico modelli in background: guarda il badge OCR in alto"); } catch (err) { toast("Errore: " + err.message); }
+        try { const s2 = await api("/api/status"); paintOcrState(s2); } catch {}
+        w.disabled = false; w.textContent = "Precarica ora";
+      };
+    } catch {}
+  }, 0);
+  const v = await pr;
   if (v !== "save") return;
   const themeV = document.querySelector("#dlgbody #s-theme").value;
   document.documentElement.dataset.theme = themeV;
@@ -1115,6 +1123,42 @@ function showSetupWizard(status) {
   $("conv").innerHTML = `<div class="empty"><div class="big" aria-hidden="true">📁</div><p>Quando hai una wiki, qui vedrai split Originale|Convertito accoppiati.</p></div>`;
   $("empty-new").onclick = () => newWikiDialog();
   $("wz-settings").onclick = () => openSettingsDialog();
+}
+
+/* ---------- ocr badge WP7-bis ---------- */
+function paintOcrState(st) {
+  const b = $("ocrbadge");
+  if (!b) return;
+  const el = document.querySelector("#dlgbody #s-ocr");
+  if (st.ocrReady) {
+    b.textContent = `OCR pronto (${st.ocrEngine || "docling"})`;
+    b.className = "pill ok ready";
+    b.title = "Modelli OCR caricati: converti senza attesa";
+    if (el) el.innerHTML = `Modelli OCR: ✅ pronti (${esc(st.ocrEngine || "")}) <button class="mini" id="s-warm2" type="button">Ricarica</button>`;
+  } else if (st.ocrLoading) {
+    b.textContent = "OCR carico…";
+    b.className = "pill warn loading";
+    b.title = "Carico modelli OCR in background: puoi lavorare, ti avviso quando pronto";
+    if (el) el.firstChild.textContent = "Modelli OCR: ⏳ carico in background… ";
+  } else if (st.ocrError) {
+    b.textContent = "OCR da caricare";
+    b.className = "pill warn";
+    b.title = `Non pronto: ${st.ocrError.slice(0, 120)}. Premi per precaricare`;
+    if (el) el.innerHTML = `Modelli OCR: ⚠️ ${esc(st.ocrError.slice(0, 160))} <button class="mini" id="s-warm3" type="button">Precarica ora</button>`;
+  } else {
+    b.textContent = "OCR …";
+    b.className = "pill";
+    if (el) el.firstChild.textContent = "Modelli OCR: … ";
+  }
+  const w2 = document.querySelector("#dlgbody #s-warm2") || document.querySelector("#dlgbody #s-warm3");
+  if (w2) w2.onclick = async () => { try { await post("/api/warmup-ocr", {}); toast("Precarico modelli in background"); } catch (err) { toast("Errore: " + err.message); } };
+}
+async function refreshOcrBadge() {
+  try {
+    const st = await api("/api/status");
+    paintOcrState(st);
+    return st;
+  } catch { return {}; }
 }
 
 /* ---------- chrome ---------- */
@@ -1172,6 +1216,14 @@ window.addEventListener("hashchange", () => {
   initTheme();
   try { initDockMode(); } catch {}
   try { $("settingsbtn").onclick = () => openSettingsDialog(); } catch {}
+  try {
+    $("ocrbadge").onclick = () => openSettingsDialog();
+    refreshOcrBadge();
+    setInterval(async () => {
+      const st = await refreshOcrBadge().catch(() => ({}));
+      if (st.ocrReady && !window._ocrToastDone) { window._ocrToastDone = true; toast("Modelli OCR pronti: ora converti senza attesa"); }
+    }, 5000);
+  } catch {}
   try { $("llmrefresh").onclick = () => refreshLlmLog(); refreshLlmLog(); } catch {}
   try {
     const o = opts();

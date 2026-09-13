@@ -259,6 +259,9 @@ pre { background: var(--panel-2); padding: 10px; border-radius: 8px; overflow-x:
 #dockopts input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--acc); }
 #dockopts select { padding: 4px 8px; font-size: 13px; }
 #dockfiles { font-size: 12px; color: var(--muted); padding: 0 14px; }
+#ocrbadge { cursor: pointer; }
+#ocrbadge.ready { color: var(--ok); border-color: var(--ok); }
+#ocrbadge.loading { color: var(--warn-ink); border-color: var(--warn-bd); }
 #llmlogbox { margin: 4px 14px 0; font-size: 13px; }
 #llmlogbox summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 #llmlog { display: grid; gap: 8px; margin-top: 6px; max-height: 220px; overflow-y: auto; }

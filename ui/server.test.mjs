@@ -261,6 +261,8 @@ test("status WP7: warmup fields daemonOk/sidecarOk senza lentezza", async () => 
 	assert.equal(typeof r.body.daemonOk, "boolean");
 	assert.equal(typeof r.body.sidecarOk, "boolean");
 	assert.ok(typeof r.body.sidecarEngine === "string");
+	assert.equal(typeof r.body.ocrReady, "boolean");
+	assert.equal(typeof r.body.ocrLoading, "boolean");
 	assert.ok(Date.now() - t0 < 5000, "status deve restare veloce");
 });
 

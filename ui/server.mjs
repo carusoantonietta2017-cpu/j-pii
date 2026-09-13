@@ -30,6 +30,32 @@ if (!process.env.JPII_PYTHON) {
 
 const daemon = new Daemon();
 
+// WP7-bis warmup OCR reale: precarica modelli docling in background, espone stato
+const ocrState = { loading: false, ready: false, error: "", engine: process.env.UI_WARMUP_ENGINE || "docling", startedAt: 0 };
+export function ocrStatus() { return { ...ocrState }; }
+export async function warmupOcr(force = false) {
+  if (process.env.UI_PREWARM === "0" && !force) return ocrStatus();
+  if (ocrState.loading || (ocrState.ready && !force)) return ocrStatus();
+  ocrState.loading = true; ocrState.ready = false; ocrState.error = "";
+  ocrState.startedAt = Date.now();
+  try {
+    const dir = mkdtempSync(join(tmpdir(), "ocr-pi-warm-"));
+    // PNG 1x1 minimo: basta a far caricare i modelli docling
+    const tiny = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const src = join(dir, "warm.png");
+    writeFileSync(src, tiny);
+    await daemon.convert({ path: src, engine: ocrState.engine, workdir: dir, deskew: false }, process.cwd());
+    ocrState.ready = true;
+    console.log(`[warmup] modelli OCR (${ocrState.engine}) pronti in ${Math.round((Date.now() - ocrState.startedAt) / 1000)}s`);
+  } catch (err) {
+    ocrState.error = err instanceof Error ? err.message : String(err);
+    console.error(`[warmup] OCR non pronto: ${ocrState.error}`);
+  } finally {
+    ocrState.loading = false;
+  }
+  return ocrStatus();
+}
+
 // WP4 trasparenza LLM: storico invii al modello (mai valori veri, solo placeholder e conteggi)
 const llmLog = [];
 function logLlm(entry) {
@@ -290,7 +316,13 @@ export function createApp() {
 						if (hr.ok) sidecarEngine = "rizzo-pii";
 					} catch {}
 				}
-				return send(res, 200, { wikiRoot: config.wikiRoot, wikiRootExists, wikisCount, needsSetup: !wikiRootExists || wikisCount === 0, daemonOk, sidecarOk, sidecarEngine });
+				return send(res, 200, { wikiRoot: config.wikiRoot, wikiRootExists, wikisCount, needsSetup: !wikiRootExists || wikisCount === 0, daemonOk, sidecarOk, sidecarEngine, ocrReady: ocrState.ready, ocrLoading: ocrState.loading, ocrError: ocrState.error, ocrEngine: ocrState.engine });
+			}
+
+			// POST /api/warmup-ocr (WP7-bis: precarica modelli ora, background)
+			if (req.method === "POST" && url.pathname === "/api/warmup-ocr") {
+				warmupOcr(true).catch(() => {});
+				return send(res, 200, ocrStatus());
 			}
 
 			// GET /api/version (WP6 hardening: release tracciabile)
@@ -786,6 +818,7 @@ export function createApp() {
 export function prewarm() {
 	if (process.env.UI_PREWARM === "0") return;
 	try { daemon.ensure(process.cwd()); } catch {}
+	try { warmupOcr().catch(() => {}); } catch {}
 	if ((process.env.JPII_ANALYZER ?? "real") !== "fake") {
 		const url = `${process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005"}/health`;
 		const ctl = new AbortController();

@@ -354,12 +354,21 @@ def main():
 
             def s_settings_wizard():
                 assert pg.locator("#settingsbtn").count() == 1
+                assert pg.locator("#ocrbadge").count() == 1
                 pg.locator("#settingsbtn").evaluate("b=>b.click()")
                 pg.wait_for_selector("#dlg[open]", timeout=3000)
+                # si apre subito, anche se lo stato carica dopo
                 assert "Motore OCR" in pg.locator("#dlg").inner_text()
+                pg.wait_for_timeout(1200)
+                assert "Modelli OCR" in pg.locator("#dlg").inner_text()
                 pg.keyboard.press("Escape")
                 pg.wait_for_timeout(300)
-            step("settings dialog", s_settings_wizard)
+                st = api(base, "/api/status")
+                assert isinstance(st.get("ocrReady"), bool)
+                assert "ocrEngine" in st
+                w = api(base, "/api/warmup-ocr", "POST", {})
+                assert "loading" in w or "ready" in w
+            step("settings dialog + ocr warmup", s_settings_wizard)
 
             def s_hardening():
                 sw = api(base, "/sw.js", method="GET")
