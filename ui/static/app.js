@@ -1096,6 +1096,7 @@ async function openSettingsDialog() {
       <div class="field"><span><label for="s-pages">Pagine default</label></span><input id="s-pages" autocomplete="off" placeholder="Tutte, es. 1-3"></div>
       <div class="field"><label><span><input type="checkbox" id="s-deskew"> Raddrizza foto storte di default</span></label></div>
       <p class="hint">Modello dock: <code>${esc(cfg.model || "?")}</code> · Cartella lavoro: <code>${esc(st.wikiRoot || cfg.wikiRoot || "?")}</code>${st.needsSetup ? ` · <b>da configurare</b>` : ""}</p>
+      <p class="hint">Pronto: demone ${st.daemonOk ? "✅" : "…"} · sidecar ${st.sidecarOk ? `✅ ${esc(st.sidecarEngine || "")}` : "…"} (warmup preventivo best-effort, mai bloccante)</p>
       <p class="hint">Falsi positivi PII (es. DATE nei nomi file)? Avvia con <code>JPII_EXCLUDE_TAGS=DATE,TIME,BUILDINGNUM,AGE,ZIPCODE</code>.</p>`,
     actions: [{ label: "Annulla", value: null }, { label: "Salva", kind: "primary", value: "save" }],
   });

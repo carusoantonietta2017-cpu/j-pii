@@ -370,6 +370,13 @@ def main():
                 assert ver["name"] == "ocr-pi-ui"
             step("hardening: sw + manifest + version", s_hardening)
 
+            def s_perf():
+                st = api(base, "/api/status")
+                assert isinstance(st.get("daemonOk"), bool)
+                assert isinstance(st.get("sidecarOk"), bool)
+                assert st.get("daemonOk") is True
+            step("performance: status warmup veloce", s_perf)
+
             def s_dock():
                 assert pg.locator("#dockmodel").inner_text().strip() not in ("", "…") or True
                 pg.locator("#docknew").click()

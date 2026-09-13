@@ -254,6 +254,16 @@ test("chat con modello inesistente risponde errore, mai muta", async () => {
 	}
 });
 
+test("status WP7: warmup fields daemonOk/sidecarOk senza lentezza", async () => {
+	const t0 = Date.now();
+	const r = await j("/api/status");
+	assert.equal(r.status, 200);
+	assert.equal(typeof r.body.daemonOk, "boolean");
+	assert.equal(typeof r.body.sidecarOk, "boolean");
+	assert.ok(typeof r.body.sidecarEngine === "string");
+	assert.ok(Date.now() - t0 < 5000, "status deve restare veloce");
+});
+
 test("hardening WP6: sw.js + manifest + version", async () => {
 	const sw = await fetch(base + "/sw.js");
 	assert.equal(sw.status, 200);

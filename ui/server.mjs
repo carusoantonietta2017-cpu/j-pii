@@ -261,20 +261,36 @@ export function createApp() {
 				return send(res, 200, { segments: out, engine: "fake" });
 			}
 
-			// GET /api/status (workdir sempre: guida l'utente se non configurata)
-			if (req.method === "GET" && url.pathname === "/api/status") {				let wikiRootExists = false;
-			let wikisCount = 0;
-			try {
-				const st = await stat(join(config.wikiRoot, "wiki"));
-				wikiRootExists = st.isDirectory();
-				if (wikiRootExists) {
-					const out = await cli(["list"]);
-				wikisCount = Array.isArray(out) ? out.length : 0;
+			// GET /api/status (workdir + warmup WP7: mai lento, best-effort con timeout corti)
+			if (req.method === "GET" && url.pathname === "/api/status") {
+				let wikiRootExists = false;
+				let wikisCount = 0;
+				try {
+					const st = await stat(join(config.wikiRoot, "wiki"));
+					wikiRootExists = st.isDirectory();
+					if (wikiRootExists) {
+						const out = await cli(["list"]);
+						wikisCount = Array.isArray(out) ? out.length : 0;
+					}
+				} catch {
+					wikiRootExists = false;
 				}
-			} catch {
-				wikiRootExists = false;
-			}
-			return send(res, 200, { wikiRoot: config.wikiRoot, wikiRootExists, wikisCount, needsSetup: !wikiRootExists || wikisCount === 0 });
+				let daemonOk = false;
+				try { daemon.ensure(process.cwd()); daemonOk = true; } catch {}
+				let sidecarOk = false;
+				let sidecarEngine = process.env.JPII_ANALYZER === "fake" ? "fake" : "unknown";
+				if (process.env.JPII_ANALYZER === "fake") sidecarOk = true;
+				else {
+					try {
+						const ctl = new AbortController();
+						const t = setTimeout(() => ctl.abort(), 1500);
+						const hr = await fetch(`${process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005"}/health`, { signal: ctl.signal });
+						clearTimeout(t);
+						sidecarOk = hr.ok;
+						if (hr.ok) sidecarEngine = "rizzo-pii";
+					} catch {}
+				}
+				return send(res, 200, { wikiRoot: config.wikiRoot, wikiRootExists, wikisCount, needsSetup: !wikiRootExists || wikisCount === 0, daemonOk, sidecarOk, sidecarEngine });
 			}
 
 			// GET /api/version (WP6 hardening: release tracciabile)
@@ -767,9 +783,23 @@ export function createApp() {
 	return server;
 }
 
+export function prewarm() {
+	if (process.env.UI_PREWARM === "0") return;
+	try { daemon.ensure(process.cwd()); } catch {}
+	if ((process.env.JPII_ANALYZER ?? "real") !== "fake") {
+		const url = `${process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005"}/health`;
+		const ctl = new AbortController();
+		const t = setTimeout(() => { try { ctl.abort(); } catch {} }, 2000);
+		fetch(url, { signal: ctl.signal }).catch(() => {}).finally(() => clearTimeout(t));
+	}
+}
+
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
 	const { mkdirSync } = await import("node:fs");
 	mkdirSync(join(config.wikiRoot, "wiki"), { recursive: true });
-	createApp().listen(config.port, () => console.log(`ocr-pi ui su http://localhost:${config.port} (wiki: ${config.wikiRoot})`));
+	createApp().listen(config.port, () => {
+		console.log(`ocr-pi ui su http://localhost:${config.port} (wiki: ${config.wikiRoot})`);
+		prewarm();
+	});
 }
