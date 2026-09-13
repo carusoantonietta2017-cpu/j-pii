@@ -170,6 +170,13 @@ function renderMd(md, fileUrl) {
 
 /* ---------- sidebar ---------- */
 async function refresh() {
+  try {
+    const st = await api("/api/status").catch(() => null);
+    if (st && st.needsSetup) {
+      const wikis = await api("/api/wikis").catch(() => []);
+      if (!wikis.length) { showSetupWizard(st); renderSide(""); return; }
+    }
+  } catch {}
   const [wikis, sources, config] = await Promise.all([
     api("/api/wikis"),
     api("/api/sources").catch(() => []),
@@ -1066,6 +1073,49 @@ function initDockMode() {
   head.addEventListener("pointerup", () => { drag = false; });
 }
 
+/* ---------- settings + wizard WP5 ---------- */
+async function openSettingsDialog() {
+  const o = opts();
+  setTimeout(() => {
+    try {
+      const t = document.querySelector("#dlgbody #s-theme"); if (t) t.value = document.documentElement.dataset.theme || "light";
+      const e = document.querySelector("#dlgbody #s-engine"); if (e) e.value = o.engine || "docling";
+      const pg = document.querySelector("#dlgbody #s-pages"); if (pg) pg.value = o.pages || "";
+      const dk = document.querySelector("#dlgbody #s-deskew"); if (dk) dk.checked = !!o.deskew;
+    } catch {}
+  }, 0);
+  const theme = document.documentElement.dataset.theme || "light";
+  let cfg = {};
+  try { cfg = await api("/api/config"); } catch {}
+  let st = {};
+  try { st = await api("/api/status"); } catch {}
+  const v = await openDialog({
+    title: "Impostazioni",
+    bodyHTML: `<div class="field"><span><label for="s-theme">Tema</label></span><select id="s-theme"><option value="light">Chiaro</option><option value="dark">Scuro</option></select></div>
+      <div class="field"><span><label for="s-engine">Motore OCR default</label></span><select id="s-engine"><option>docling</option><option>fake</option></select><span class="hint">Vale per upload, sorgenti e raw. I modelli restano locali.</span></div>
+      <div class="field"><span><label for="s-pages">Pagine default</label></span><input id="s-pages" autocomplete="off" placeholder="Tutte, es. 1-3"></div>
+      <div class="field"><label><span><input type="checkbox" id="s-deskew"> Raddrizza foto storte di default</span></label></div>
+      <p class="hint">Modello dock: <code>${esc(cfg.model || "?")}</code> · Cartella lavoro: <code>${esc(st.wikiRoot || cfg.wikiRoot || "?")}</code>${st.needsSetup ? ` · <b>da configurare</b>` : ""}</p>
+      <p class="hint">Falsi positivi PII (es. DATE nei nomi file)? Avvia con <code>JPII_EXCLUDE_TAGS=DATE,TIME,BUILDINGNUM,AGE,ZIPCODE</code>.</p>`,
+    actions: [{ label: "Annulla", value: null }, { label: "Salva", kind: "primary", value: "save" }],
+  });
+  if (v !== "save") return;
+  const themeV = document.querySelector("#dlgbody #s-theme").value;
+  document.documentElement.dataset.theme = themeV;
+  try { localStorage.setItem("ocr-pi-theme", themeV); } catch {}
+  saveOpts({ engine: document.querySelector("#dlgbody #s-engine").value, pages: document.querySelector("#dlgbody #s-pages").value.trim(), deskew: document.querySelector("#dlgbody #s-deskew").checked });
+  try { const dd = $("dockengine"); if (dd) dd.value = document.querySelector("#dlgbody #s-engine").value; } catch {}
+  toast("Impostazioni salvate");
+}
+function showSetupWizard(status) {
+  state.sel = null; state.card = null;
+  renderCrumbs(null);
+  $("orig").innerHTML = `<div class="card"><h3>Benvenuto — configura la cartella di lavoro</h3><p>L'app ha sempre bisogno di una cartella wiki. Ora punta a <code>${esc(status.wikiRoot || "?")}</code>${status.wikiRootExists ? "" : " (non esiste ancora)"}.</p><ol><li>Crea la prima wiki col bottone sotto.</li><li>Converti un file o aggiungi una cartella sorgente.</li><li>Apri Impostazioni ⚙ per motore e tema.</li></ol><p><button class="btn primary" id="empty-new">Crea la prima wiki…</button> <button class="btn" id="wz-settings">Impostazioni…</button></p></div>`;
+  $("conv").innerHTML = `<div class="empty"><div class="big" aria-hidden="true">📁</div><p>Quando hai una wiki, qui vedrai split Originale|Convertito accoppiati.</p></div>`;
+  $("empty-new").onclick = () => newWikiDialog();
+  $("wz-settings").onclick = () => openSettingsDialog();
+}
+
 /* ---------- chrome ---------- */
 function initTheme() {
   const saved = localStorage.getItem("ocr-pi-theme");
@@ -1120,6 +1170,7 @@ window.addEventListener("hashchange", () => {
 (function init() {
   initTheme();
   try { initDockMode(); } catch {}
+  try { $("settingsbtn").onclick = () => openSettingsDialog(); } catch {}
   try { $("llmrefresh").onclick = () => refreshLlmLog(); refreshLlmLog(); } catch {}
   try {
     const o = opts();

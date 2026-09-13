@@ -352,6 +352,15 @@ def main():
                 assert "cosa vede" in pg.locator("#llmlogbox").inner_text().lower()
             step("trasparenza LLM: pannello + log", s_llmlog)
 
+            def s_settings_wizard():
+                assert pg.locator("#settingsbtn").count() == 1
+                pg.locator("#settingsbtn").evaluate("b=>b.click()")
+                pg.wait_for_selector("#dlg[open]", timeout=3000)
+                assert "Motore OCR" in pg.locator("#dlg").inner_text()
+                pg.keyboard.press("Escape")
+                pg.wait_for_timeout(300)
+            step("settings dialog", s_settings_wizard)
+
             def s_dock():
                 assert pg.locator("#dockmodel").inner_text().strip() not in ("", "…") or True
                 pg.locator("#docknew").click()

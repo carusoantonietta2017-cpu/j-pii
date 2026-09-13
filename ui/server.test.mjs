@@ -182,7 +182,7 @@ test("config, ricerca globale, trash e statici css", async () => {
 	assert.equal(css.status, 200);
 	assert.ok((css.headers.get("content-type") ?? "").includes("css"));
 	const html = await (await fetch(base + "/")).text();
-	for (const id of ["dockform", "gsearch", "dlg", "toast", "docknew", "newwikibtn", "themebtn", "dockassist", "dockpop", "dockpin", "llmrefresh"]) {
+	for (const id of ["dockform", "gsearch", "dlg", "toast", "docknew", "newwikibtn", "themebtn", "dockassist", "dockpop", "dockpin", "llmrefresh", "settingsbtn"]) {
 		assert.ok(html.includes(`id="${id}"`), `manca #${id} in index.html`);
 	}
 	for (const tid of ['nav-sidebar', 'nav-wiki-list', 'viewer-split', 'viewer-original', 'editor-md', 'dock', 'dock-log', 'llm-log']) {
