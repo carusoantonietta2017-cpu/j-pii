@@ -166,6 +166,9 @@ export async function maskStrings<T>(value: T, cwd = "."): Promise<{ result: T; 
 								const untrusted =
 									role === "user" ||
 									role === "tool" ||
+									role === "toolResult" ||
+									role === "toolresult" ||
+									role === "custom" ||
 									(typeof kind === "string" && kind.includes("output"));
 								if (!untrusted) return m;
 								const out: Record<string, unknown> = { ...mm };

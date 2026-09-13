@@ -230,7 +230,9 @@ def main():
                 pg.wait_for_selector("#mdhost", timeout=5000)
                 assert pg.locator("#orig img.doc").evaluate("img => img.naturalWidth") > 0
                 assert "iva" in pg.locator("#conv").inner_text().lower()
-                assert pg.locator("#conv .segmented").count() == 1
+                assert pg.locator("#conv .segmented").count() >= 1
+                assert pg.locator("#tabPrev").count() == 1 and pg.locator("#tabEdit").count() == 1
+                assert pg.locator("#mdedit").count() == 1
                 pg.screenshot(path=f"{SHOTS}/08d-raw-matched.png")
             step("raw collegato: immagine + voce", s_raw_matched)
 
@@ -279,6 +281,110 @@ def main():
                 pg.wait_for_timeout(1500)
                 assert "draft" in pg.content().lower()
             step("upload fake → salva", s_upload_fake)
+
+            def s_pairing_persist():
+                # bug utente: dopo save, selezionando l'md deve restare l'originale accoppiato
+                det = api(base, "/api/wiki/demo")
+                docs = det.get("docs", det) if isinstance(det, dict) else det
+                pair = next((d for d in docs if d["file"] == "doc/tiny.md"), None)
+                assert pair is not None, f"voce x non trovata: {det}"
+                assert pair.get("raw"), f"pairing perso dopo save: {pair}"
+                # via UI: click voce tiny -> orig deve mostrare img collegata
+                pg.locator('#wikis button', has_text="tiny").first.click()
+                pg.wait_for_selector("#mdhost", timeout=8000)
+                pg.wait_for_selector("#orig img.doc", timeout=8000)
+                assert "collegato" in pg.locator("#orig").inner_text().lower()
+                assert "accoppiato" in pg.locator("#orig").inner_text().lower()
+                assert pg.locator("#orig > p > img.doc").count() == 1, "a sinistra solo l'originale accoppiato"
+                assert "altri originali" in pg.locator("#orig").inner_text().lower()
+                # tabs editor presenti (WP2)
+                assert pg.locator("#tabPrev").count() == 1
+                pg.locator("#tabEdit").click()
+                pg.wait_for_timeout(300)
+                assert pg.locator("#mdedit").is_visible()
+                pg.locator("#tabPrev").click()
+                pg.screenshot(path=f"{SHOTS}/09b-pairing.png")
+            step("pairing persiste dopo save (bug originale)", s_pairing_persist)
+
+            def s_dockmode():
+                assert pg.locator("#dockassist").count() == 1
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+                pg.locator("#dockpop").evaluate("b=>b.click()")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "floating"
+                assert pg.locator("#docknew").is_visible(), "Nuova conversazione deve restare visibile nel popup"
+                rs = pg.locator("#dock").evaluate("d=>{const c=getComputedStyle(d);return {resize:c.resize,minW:c.minWidth,maxW:c.maxWidth}}")
+                assert rs["resize"] == "both", f"popup ridimensionabile atteso, got {rs}"
+                assert rs["minW"] == "320px"
+                assert pg.evaluate("localStorage.getItem('ocr-pi-dockmode')") == "floating"
+                pg.screenshot(path=f"{SHOTS}/10a-dock-floating.png")
+                pg.locator("#dockpin").evaluate("b=>b.click()")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+                pg.locator("#dockassist").evaluate("b=>b.click()")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "floating"
+                # regressione: resize+drag popup poi riaggancia deve tornare pulito
+                pg.locator("#dockpop").evaluate("b=>b.click()")
+                pg.wait_for_timeout(200)
+                pg.locator("#dock").evaluate("d=>{d.style.width='700px';d.style.height='500px';d.style.right='100px';d.style.bottom='100px'}")
+                pg.wait_for_timeout(200)
+                pg.locator("#dockpin").evaluate("b=>b.click()")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+                st = pg.locator("#dock").evaluate("d=>({w:d.style.width,h:d.style.height,r:d.style.right,b:d.style.bottom})")
+                assert st == {"w": "", "h": "", "r": "", "b": ""}, f"stili popup rimasti in embedded: {st}"
+                bw = pg.locator("#dock").evaluate("d=>d.getBoundingClientRect().width")
+                vw = pg.evaluate("window.innerWidth")
+                assert bw > vw * 0.8, f"dock embedded troppo stretto dopo popup: {bw}/{vw}"
+                pg.keyboard.press("Escape")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+                pg.reload(wait_until="networkidle")
+                pg.wait_for_timeout(600)
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+            step("dock dual-mode embedded<->popup", s_dockmode)
+
+            def s_llmlog():
+                assert pg.locator('[data-testid="llm-log"]').count() == 1
+                pg.locator("#llmrefresh").evaluate("b=>b.click()")
+                pg.wait_for_timeout(600)
+                assert "cosa vede" in pg.locator("#llmlogbox").inner_text().lower()
+            step("trasparenza LLM: pannello + log", s_llmlog)
+
+            def s_settings_wizard():
+                assert pg.locator("#settingsbtn").count() == 1
+                assert pg.locator("#ocrbadge").count() == 1
+                pg.locator("#settingsbtn").evaluate("b=>b.click()")
+                pg.wait_for_selector("#dlg[open]", timeout=3000)
+                # si apre subito, anche se lo stato carica dopo
+                assert "Motore OCR" in pg.locator("#dlg").inner_text()
+                pg.wait_for_timeout(1200)
+                assert "Modelli OCR" in pg.locator("#dlg").inner_text()
+                pg.keyboard.press("Escape")
+                pg.wait_for_timeout(300)
+                st = api(base, "/api/status")
+                assert isinstance(st.get("ocrReady"), bool)
+                assert "ocrEngine" in st
+                w = api(base, "/api/warmup-ocr", "POST", {})
+                assert "loading" in w or "ready" in w
+            step("settings dialog + ocr warmup", s_settings_wizard)
+
+            def s_hardening():
+                sw = api(base, "/sw.js", method="GET")
+                assert b"ocr-pi-v1" in sw
+                mf = api(base, "/manifest.json")
+                assert mf["short_name"] == "ocr-pi"
+                ver = api(base, "/api/version")
+                assert ver["name"] == "ocr-pi-ui"
+            step("hardening: sw + manifest + version", s_hardening)
+
+            def s_perf():
+                st = api(base, "/api/status")
+                assert isinstance(st.get("daemonOk"), bool)
+                assert isinstance(st.get("sidecarOk"), bool)
+                assert st.get("daemonOk") is True
+            step("performance: status warmup veloce", s_perf)
 
             def s_dock():
                 assert pg.locator("#dockmodel").inner_text().strip() not in ("", "…") or True

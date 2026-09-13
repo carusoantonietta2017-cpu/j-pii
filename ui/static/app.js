@@ -2,6 +2,43 @@
 const $ = (id) => document.getElementById(id);
 const state = { wikis: [], details: {}, sources: [], sel: null, card: null, config: { model: "…" }, search: null };
 const SENSITIVE = /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+const stripFrontmatter = (md) => String(md || '').replace(/^---\n[\s\S]*?\n---\n/, '');
+const parseFrontmatter = (md) => {
+  const m = String(md || '').match(/^---\n([\s\S]*?)\n---\n/);
+  if (!m) return {};
+  const out = {};
+  for (const line of m[1].split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+};
+// Pair originale<->md: preferisce meta.raw, fallback stem match (stessa regola server)
+const slugStem = (n) => String(n).toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+const resolvePair = (docs, rawNames, identifier) => {
+  const ident = String(identifier);
+  for (const d of docs || []) {
+    if (ident === d.file || ident === d.name) {
+      let raw = d.raw || '';
+      if (!raw) {
+        const st = slugStem((d.file || '').split('/').pop());
+        const hit = (rawNames || []).find((r) => slugStem(r) === st || slugStem(d.name || '') === slugStem(r));
+        if (hit) raw = 'raw/' + hit;
+      }
+      return { doc: d.file, raw, name: d.name };
+    }
+  }
+  const rbase = ident.split('/').pop();
+  for (const d of docs || []) {
+    if ((d.raw || '').split('/').pop() === rbase) return { doc: d.file, raw: d.raw, name: d.name };
+  }
+  for (const d of docs || []) {
+    if (slugStem((d.file || '').split('/').pop()) === slugStem(rbase) || slugStem(d.name || '') === slugStem(rbase)) {
+      return { doc: d.file, raw: d.raw || ('raw/' + rbase), name: d.name };
+    }
+  }
+  return { doc: '', raw: rbase ? 'raw/' + rbase : '', name: '' };
+};
 
 async function api(path, opts = {}) {
   const r = await fetch(path, opts);
@@ -74,13 +111,29 @@ function openDialog({ title, bodyHTML, actions = [{ label: "Chiudi", value: null
 
 /* ---------- markdown ---------- */
 function renderMd(md, fileUrl) {
-  const dir = String(fileUrl || "").split("/").slice(0, -1).join("/");
+  // risolve asset relativi tipo assets/x.png rispetto al file md (via ?path=, con encoding corretto)
+  const resolveImg = (src) => {
+    const s = String(src).trim();
+    if (/^(javascript|vbscript|data:text\/html)/i.test(s)) return null;
+    if (s.startsWith("http") || s.startsWith("/") || s.startsWith("blob:") || s.startsWith("data:")) return s;
+    const fu = String(fileUrl || "");
+    const m = fu.match(/^(\/api\/wiki\/[^/]+)\/file\?path=(.+)$/);
+    if (m) {
+      try {
+        const cur = decodeURIComponent(m[2]);
+        const dir = cur.includes("/") ? cur.slice(0, cur.lastIndexOf("/")) : "";
+        const joined = dir ? dir + "/" + s : s;
+        return m[1] + "/file?path=" + encodeURIComponent(joined);
+      } catch { /* fallback sotto */ }
+    }
+    const dir = fu.split("/").slice(0, -1).join("/");
+    return dir ? dir + "/" + s : s;
+  };
   const imgTag = (tok) => {
     const m = tok.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
     if (!m) return esc(tok);
-    const s = m[2].trim();
-    if (/^(javascript|vbscript|data:text\/html)/i.test(s)) return esc(m[1]);
-    const u = s.startsWith("http") || s.startsWith("/") || s.startsWith("blob:") || s.startsWith("data:") ? s : (dir ? dir + "/" + s : s);
+    const u = resolveImg(m[2]);
+    if (u === null) return esc(m[1]);
     return `<img class="doc" loading="lazy" alt="${esc(m[1])}" src="${esc(u)}">`;
   };
   const inline = (raw) => {
@@ -117,6 +170,13 @@ function renderMd(md, fileUrl) {
 
 /* ---------- sidebar ---------- */
 async function refresh() {
+  try {
+    const st = await api("/api/status").catch(() => null);
+    if (st && st.needsSetup) {
+      const wikis = await api("/api/wikis").catch(() => []);
+      if (!wikis.length) { showSetupWizard(st); renderSide(""); return; }
+    }
+  } catch {}
   const [wikis, sources, config] = await Promise.all([
     api("/api/wikis"),
     api("/api/sources").catch(() => []),
@@ -247,7 +307,11 @@ async function select(wiki, file, { silent } = {}) {
       fetch(base + "/file?path=" + encodeURIComponent(file)).then((r) => { if (!r.ok) throw new Error("Voce illeggibile: scegli un’altra voce"); return r.text(); }),
     ]);
     const doc = (meta.docs || []).find((x) => x.file === file) || { name: file, review: "?" };
-    const sensitive = SENSITIVE.test(text);
+    const body = stripFrontmatter(text);
+    const fm = parseFrontmatter(text);
+    const pair = resolvePair(meta.docs || [], meta.raw || [], file);
+    const pairedRaw = (doc.raw || pair.raw || fm.source?.replace(/^\.\.\//, '') || '').replace(/^raw\//, '');
+    const sensitive = SENSITIVE.test(body);
     renderCrumbs({ wiki, file }, { ...doc, sensitive });
     $("conv").innerHTML = `<h2>${esc(doc.name)}</h2>
       <div class="toolbar">
@@ -263,7 +327,19 @@ async function select(wiki, file, { silent } = {}) {
         </div>
         <div class="hint">Le opzioni valgono per le prossime conversioni (upload, sorgenti, originali wiki). I modelli restano in locale, mai in rete.</div>
       </div>
-      <div id="mdhost">${renderMd(text, base + "/file?path=" + encodeURIComponent(file))}</div>
+      <div class="toolbar" role="tablist" aria-label="Modo editor">
+        <div class="segmented" role="group" aria-label="Anteprima o modifica">
+          <button id="tabPrev" aria-pressed="true">Anteprima</button>
+          <button id="tabEdit" aria-pressed="false">Modifica</button>
+        </div>
+        <span class="hint" id="piiHint">Evidenzio PII come rizzo-pii…</span>
+      </div>
+      <div id="mdhost">${renderMd(body, base + "/file?path=" + encodeURIComponent(file))}</div>
+      <div id="edithost" hidden>
+        <label class="hint" for="mdedit">Markdown (frontmatter preservato in automatico)</label>
+        <textarea id="mdedit" style="min-height:260px" spellcheck="false"></textarea>
+        <div class="toolbar"><button class="btn primary small" id="bSave">Salva</button><button class="btn small" id="bCancel">Annulla</button><span class="hint">Salvataggio rimette <b>draft</b> se era approvata.</span></div>
+      </div>
       <div class="card"><h3>Review</h3>
         <div class="segmented" role="group" aria-label="Stato di review">
           ${["draft", "reviewed", "versioned"].map((s) => `<button data-s="${s}" aria-pressed="${doc.review === s}"> ${s === "draft" ? "Draft" : s === "reviewed" ? "✓ Reviewed" : "✓✓ Versioned"}</button>`).join("")}
@@ -299,24 +375,106 @@ async function select(wiki, file, { silent } = {}) {
       };
     });
     let masked = false;
+    let piiSegs = [];
+    let piiEngine = "…";
+    const paintPii = () => {
+      if (masked) return;
+      if (!$("mdhost")) return;
+      let html = renderMd(body, base + "/file?path=" + encodeURIComponent(file));
+      // evidenzia valori PII come rizzo-pii: wrap con <mark data-label>
+      const seen = new Set();
+      for (const s of piiSegs) {
+        const val = body.slice(s.start, s.end);
+        if (!val || val.length < 2 || seen.has(s.label + "\0" + val)) continue;
+        seen.add(s.label + "\0" + val);
+        const rx = esc(val);
+        const cls = s.validated === false ? "pii doubtful" : "pii";
+        html = html.split(rx).join(`<mark class="${cls}" data-label="${esc(s.label)}" title="${esc(s.label)}${s.validated === false ? " · doubtful: Mask it / Send in clear" : ""} — click per dettagli">${rx}</mark>`);
+      }
+      $("mdhost").innerHTML = html;
+      $("mdhost").querySelectorAll("mark.pii").forEach((m) => {
+        m.onclick = () => piiDialog(m.dataset.label, m.textContent);
+      });
+    };
+    const loadPii = async () => {
+      const myWiki = wiki, myFile = file;
+      try {
+        const r = await post("/api/mask/preview", { text: body });
+        if (!state.sel || state.sel.wiki !== myWiki || state.sel.file !== myFile) return;
+        if (!$("piiHint") || !$("mdhost")) return;
+        piiSegs = r.segments || [];
+        piiEngine = r.engine || "?";
+        $("piiHint").textContent = piiSegs.length
+          ? `${piiSegs.length} PII via ${piiEngine} — click su un valore per dettagli`
+          : `Nessuna PII via ${piiEngine}`;
+        paintPii();
+      } catch {
+        if (!state.sel || state.sel.wiki !== myWiki || state.sel.file !== myFile) return;
+        if ($("piiHint")) $("piiHint").textContent = "PII non disponibile";
+      }
+    };
+    loadPii();
     $("bMask").onclick = (e) => {
       masked = !masked;
       e.currentTarget.textContent = masked ? "Mostra valori" : "Anteprima mask locale";
       e.currentTarget.setAttribute("aria-pressed", masked);
-      const t2 = masked
-        ? text.replace(/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/g, "[CF_1]").replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL_1]")
-        : text;
-      $("mdhost").innerHTML = renderMd(t2, base + "/file?path=" + encodeURIComponent(file));
+      if (masked) {
+        // mask locale sullo stesso body: placeholder come j-pii fake
+        let t2 = body;
+        const byLabel = {};
+        for (const s of piiSegs.length ? piiSegs : [{ label: "CF" }, { label: "EMAIL" }]) {
+          void s;
+        }
+        t2 = t2.replace(/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/g, "[CF_1]").replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL_1]");
+        // se engine reale, maschera anche gli altri valori rilevati
+        for (const s of piiSegs) {
+          const val = body.slice(s.start, s.end);
+          if (val && !/\[CF_1\]|\[EMAIL_1\]/.test(val)) {
+            byLabel[s.label] = (byLabel[s.label] || 0) + 1;
+            // usa contatore stabile per label solo se non già placeholder
+            if (s.label !== "CF" && s.label !== "EMAIL") t2 = t2.split(val).join(`[${s.label}_1]`);
+          }
+        }
+        $("mdhost").innerHTML = renderMd(t2, base + "/file?path=" + encodeURIComponent(file));
+      } else paintPii();
+    };
+    // tabs Anteprima | Modifica (inline, PUT preserva pairing)
+    $("mdedit").value = body;
+    const setTab = (edit) => {
+      $("tabPrev").setAttribute("aria-pressed", !edit);
+      $("tabEdit").setAttribute("aria-pressed", edit);
+      $("mdhost").hidden = edit;
+      $("edithost").hidden = !edit;
+      $("bMask").disabled = edit;
+    };
+    $("tabPrev").onclick = () => setTab(false);
+    $("tabEdit").onclick = () => setTab(true);
+    $("bCancel").onclick = () => { $("mdedit").value = body; setTab(false); };
+    $("bSave").onclick = async () => {
+      const v = $("mdedit").value;
+      if (!v.trim()) return toast("Testo vuoto: nessuna modifica salvata");
+      try {
+        const fm = parseFrontmatter(text);
+        const toSave = Object.keys(fm).length ? `---\n${Object.entries(fm).map(([k, val]) => `${k}: ${val}`).join("\n")}\n---\n\n${v}` : v;
+        const r = await fetch(`/api/wiki/${encodeURIComponent(wiki)}/file?path=${encodeURIComponent(file)}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markdown: toSave }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `errore ${r.status}`);
+        toast("Salvata (torna draft se era approvata)");
+        await select(wiki, file, { silent: true });
+      } catch (err) { toast("Errore salvataggio: " + err.message); }
     };
     $("btrash").onclick = () => trashVoceDialog(wiki, doc.name);
-    // originale + file wiki
+    // originale accoppiato: prima il raw collegato (meta.raw/frontmatter), poi gli altri
     const raws = meta.raw || [];
     const isImg = (n) => /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(n);
-    $("orig").innerHTML = `<h2>Originale</h2>` + (raws.length
-      ? raws.map((rn) => isImg(rn)
-        ? `<p><img class="doc" loading="lazy" alt="Originale ${esc(rn)}" src="${base}/file?path=${encodeURIComponent("raw/" + rn)}"></p><p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Scarica ${esc(rn)}</a></p>`
-        : `<p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Apri originale (${esc(rn)})</a></p>`).join("")
-      : `<p class="hint">Nessun originale allegato a questa voce.</p>`)
+    const others = (raws || []).filter((r) => r !== pairedRaw);
+    const singleHtml = (rn) => isImg(rn)
+      ? `<p><img class="doc" loading="lazy" alt="Originale ${esc(rn)}" src="${base}/file?path=${encodeURIComponent("raw/" + rn)}"></p><p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Scarica ${esc(rn)}</a></p>`
+      : `<p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Apri originale (${esc(rn)})</a></p>`;
+    $("orig").innerHTML = `<h2>Originale${pairedRaw ? `: ${esc(pairedRaw)}` : ""}</h2><p class="hint">Accoppiato a <code>${esc(file)}</code>${pairedRaw ? ` via <code>raw/${esc(pairedRaw)}</code>` : " — senza originale collegato"}.</p>`
+      + (pairedRaw ? `<p><span class="pill acc">collegato</span></p>` + singleHtml(pairedRaw) : `<p class="hint">Nessun originale allegato a questa voce.</p>`)
+      + (others.length ? `<details><summary>Altri originali della wiki (${others.length})</summary>` + others.map(singleHtml).join("") + `</details>` : ``)
       + `<div class="card"><h3>File wiki</h3><p class="hint">Indice, skill e metadati generati in automatico.</p><p style="display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn small" href="${base}/file?path=${encodeURIComponent("index.md")}">index.md</a>
         <a class="btn small" href="${base}/file?path=${encodeURIComponent("SKILL.md")}">SKILL.md</a>
@@ -328,12 +486,46 @@ async function select(wiki, file, { silent } = {}) {
   }
 }
 
-const slugStem = (n) => String(n).toLowerCase().replace(/\.[^.]+$/, "").replace(/[^a-z0-9]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
 function rawPreviewHTML(wiki, raw) {
   const url = `/api/wiki/${encodeURIComponent(wiki)}/file?path=${encodeURIComponent("raw/" + raw)}`;
   if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(raw)) return `<img class="doc" loading="lazy" alt="Originale ${esc(raw)}" src="${url}">`;
   if (/\.pdf$/i.test(raw)) return `<object data="${url}" type="application/pdf" width="100%" height="520" aria-label="Anteprima ${esc(raw)}"><p><a class="btn small" href="${url}" download="${esc(raw)}">Apri originale (${esc(raw)})</a></p></object>`;
   return `<p><a class="btn small" href="${url}" download="${esc(raw)}">Apri originale (${esc(raw)})</a></p>`;
+}
+
+/* dialog PII stile rizzo-pii: spiega placeholder/mapping, propone exclude */
+async function piiDialog(label, value) {
+  await openDialog({
+    title: `PII ${label}`,
+    bodyHTML: `<p>Valore rilevato: <code>${esc(value)}</code></p><p>Inviato all'LLM come <code translate="no">[${esc(label)}_1]</code> via <span translate="no">mask</span> j-pii. Il <span translate="no">mapping</span> resta solo locale.</p><p class="hint">Doubtful span = ti chiedo prima di mandarlo. Per falsi positivi (es. DATE nei nomi file) usa <code>JPII_EXCLUDE_TAGS</code> nei settings.</p>`,
+    actions: [{ label: "Chiudi", kind: "primary", value: null }],
+  });
+}
+
+/* editor minimale WP0: modifica md via PUT, preserva pairing raw */
+async function openEditorDialog(wiki, file, fullText) {
+  const current = stripFrontmatter(fullText);
+  const v = await openDialog({
+    title: `Modifica ${file}`,
+    bodyHTML: `<div class="field"><span><label for="f-md-edit">Markdown (frontmatter preservato in automatico)</label></span><textarea id="f-md-edit" style="min-height:220px" spellcheck="false">${esc(current)}</textarea><span class="hint">Salvataggio rimette <b>draft</b> se era reviewed/versioned. Originale collegato invariato.</span></div>`,
+    actions: [{ label: "Annulla", value: null }, { label: "Salva", kind: "primary", collect: (b) => b.querySelector("#f-md-edit").value }],
+  });
+  if (v === null || v === undefined) return;
+  if (!String(v).trim()) { toast("Testo vuoto: nessuna modifica salvata"); return; }
+  try {
+    // ricostruisci con frontmatter originale preservato dal server (update_file fa merge)
+    const fm = parseFrontmatter(fullText);
+    const toSave = fm && Object.keys(fm).length ? `---\n${Object.entries(fm).map(([k, val]) => `${k}: ${val}`).join("\n")}\n---\n\n${v}` : v;
+    const r = await fetch(`/api/wiki/${encodeURIComponent(wiki)}/file?path=${encodeURIComponent(file)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markdown: toSave }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || `errore ${r.status}`);
+    }
+    toast("Salvata (torna draft se era approvata)");
+    await select(wiki, file, { silent: true });
+  } catch (err) { toast("Errore salvataggio: " + err.message); }
 }
 
 /* originale già in wiki: immagine a sinistra, voce collegata (o converti) a destra */
@@ -345,8 +537,8 @@ async function selectRaw(wiki, raw) {
   $("conv").innerHTML = `<div class="skel" style="height:120px"></div>`;
   try {
     const meta = await api(`/api/wiki/${encodeURIComponent(wiki)}`);
-    const stem = slugStem(raw);
-    const doc = (meta.docs || []).find((x) => slugStem(x.file.split("/").pop()) === stem || slugStem(x.name) === stem);
+    const pair = resolvePair(meta.docs || [], meta.raw || [], raw);
+    const doc = (meta.docs || []).find((x) => x.file === pair.doc);
     if (doc) {
       state.sel = { wiki, file: doc.file };
       nav(`#/w/${encodeURIComponent(wiki)}/v/${encodeURIComponent(doc.file)}`);
@@ -376,7 +568,7 @@ async function convertRawFile(wiki, raw) {
     const r = await post(`/api/wiki/${encodeURIComponent(wiki)}/convert-raw`, { file: raw, engine: o.engine || "docling", pages: o.pages || null, deskew: !!o.deskew });
     const url = `/api/wiki/${encodeURIComponent(wiki)}/file?path=${encodeURIComponent("raw/" + raw)}`;
     const mime = /\.pdf$/i.test(raw) ? "application/pdf" : "image/*";
-    showConverted(raw, r, url, mime, wiki, raw.replace(/\.[^.]+$/, ""));
+    showConverted(raw, r, url, mime, wiki, raw.replace(/\.[^.]+$/, ""), { rawWiki: wiki, rawFile: raw });
     toast("Convertita: premi “Salva in wiki”");
   } catch (err) {
     $("conv").innerHTML = `<div class="empty"><div class="big" aria-hidden="true">⚠️</div><p>Conversione fallita: ${esc(err.message)}</p><p><button class="btn" id="bretry">Riprova</button></p></div>`;
@@ -583,7 +775,7 @@ $("trashbtn").onclick = () => showTrash(currentWiki());
 $("newwikibtn").onclick = () => newWikiDialog();
 
 /* ---------- converti ---------- */
-function showConverted(name, r, objUrl, mime, wikiHint, titleHint) {
+function showConverted(name, r, objUrl, mime, wikiHint, titleHint, rawInfo) {
   state.search = null;
   renderCrumbs(null);
   $("crumbs").innerHTML = `<nav aria-label="Breadcrumb"><b>Anteprima non salvata</b><span class="pill num">${fmtSec(r.seconds)} s</span><span class="pill">${esc(r.engine || "")}</span></nav>`;
@@ -614,9 +806,11 @@ function showConverted(name, r, objUrl, mime, wikiHint, titleHint) {
     });
     if (!v || !v.w || !v.t) { if (v) toast("Scrivi wiki e titolo, poi riprova"); return; }
     try {
-      await post(`/api/wiki/${encodeURIComponent(v.w)}/add`, { markdown: r.markdown, title: v.t, assets: r.assets || [] });
-      toast("Salvata come draft");
+      const payload = { markdown: r.markdown, title: v.t, assets: r.assets || [], ...(rawInfo || {}) };
+      const saved = await post(`/api/wiki/${encodeURIComponent(v.w)}/add`, payload);
+      toast("Salvata come draft con originale collegato");
       await refresh();
+      try { await select(v.w, saved.file); } catch { /* fallback: resta su refresh */ }
     } catch (err) { toast("Errore: " + err.message); }
   };
 }
@@ -651,7 +845,9 @@ async function runUploadConvert() {
     for (const x of new Uint8Array(up.buf)) binary += String.fromCharCode(x);
     const o = opts();
     const r = await post("/api/convert-upload", { name: up.name, dataBase64: btoa(binary), engine: o.engine || "docling", pages: o.pages || null, deskew: !!o.deskew });
-    showConverted(up.name, r, URL.createObjectURL(new Blob([up.buf], { type: up.mime || "application/octet-stream" })), up.mime || "", undefined, undefined);
+    let _bin = "";
+    for (const x of new Uint8Array(up.buf)) _bin += String.fromCharCode(x);
+    showConverted(up.name, r, URL.createObjectURL(new Blob([up.buf], { type: up.mime || "application/octet-stream" })), up.mime || "", undefined, undefined, { rawName: up.name, rawDataBase64: btoa(_bin) });
     toast("Convertita: premi “Salva in wiki”");
   } catch (err) {
     $("conv").innerHTML = `<div class="empty"><div class="big" aria-hidden="true">⚠️</div><p>Conversione fallita: ${esc(err.message)}</p><p><button class="btn" id="bretry3">Riprova</button></p></div>`;
@@ -707,9 +903,10 @@ async function convertServerFile(path) {
       });
       if (!v || !v.w) return;
       try {
-        await post(`/api/wiki/${encodeURIComponent(v.w)}/add`, { markdown: r.markdown, title: v.t || base });
-        toast("Salvata come draft");
+        const saved = await post(`/api/wiki/${encodeURIComponent(v.w)}/add`, { markdown: r.markdown, title: v.t || base, rawPath: path });
+        toast("Salvata come draft con originale collegato");
         await refresh();
+        try { await select(v.w, saved.file); } catch { /* resta su refresh */ }
       } catch (err) { toast("Errore: " + err.message + " — cambia titolo o wiki e riprova"); }
     };
     toast("Convertita: premi “Salva in wiki”");
@@ -725,7 +922,14 @@ function dockSay(who, text) {
   w.className = "who";
   w.textContent = who + ": ";
   div.appendChild(w);
-  div.appendChild(document.createTextNode(String(text).replace(/\*\*/g, "")));
+  if (who === "pi" && !String(text).startsWith("(uso ")) {
+    // risposte pi in markdown (tabelle/liste) come nel viewer, mai script: renderMd fa escape
+    const body = document.createElement("div");
+    body.innerHTML = renderMd(String(text), "");
+    div.appendChild(body);
+  } else {
+    div.appendChild(document.createTextNode(String(text).replace(/\*\*/g, "")));
+  }
   host.appendChild(div);
   host.scrollTop = host.scrollHeight;
   return div;
@@ -763,12 +967,14 @@ $("dockform").addEventListener("submit", async (e) => {
       images.push({ name: f.name, dataBase64: btoa(bin) });
     }
     const o = opts();
+    const ctx = state.sel ? { wiki: state.sel.wiki, voce: state.sel.file } : state.card ? { wiki: state.card } : {};
     const r = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: v, images,
         ocr: $("dockocr").checked, sensitive: $("docksens").checked,
         engine: $("dockengine").value || o.engine || "docling", deskew: $("dockdeskew").checked || !!o.deskew,
+        context: ctx,
       }),
     });
     $("dockimg").value = "";
@@ -777,20 +983,32 @@ $("dockform").addEventListener("submit", async (e) => {
     const text = await r.text();
     let piAnswered = false;
     let streamEl = null; // i delta di una risposta si accumulano in un solo fumetto
+    let piRaw = "";
     for (const line of text.split("\n")) {
       if (!line.startsWith("data: ")) continue;
       let ev;
       try { ev = JSON.parse(line.slice(6)); } catch { continue; }
       if (ev.type === "text_delta") {
         piAnswered = true;
+        piRaw += ev.delta;
         if (streamEl) {
-          streamEl.appendChild(document.createTextNode(ev.delta));
-          $("docklog").scrollTop = $("docklog").scrollHeight;
+          streamEl.remove();
+          streamEl = dockSay("pi", piRaw);
         } else {
-          streamEl = dockSay("pi", ev.delta);
+          streamEl = dockSay("pi", piRaw);
         }
       }
       else if (ev.type === "tool") { piAnswered = true; streamEl = null; dockSay("pi", `(uso ${ev.tool}…)`); }
+      else if (ev.type === "restored") {
+        piAnswered = true;
+        // j-pii replace: il messaggio finale ha i valori veri al posto dei placeholder
+        if (streamEl) { streamEl.remove(); streamEl = null; }
+        // rimuovi eventuale bolla placeholder parziale precedente prima di mostrare il restored
+        const msgs = $("docklog").querySelectorAll(".msg.pi");
+        if (msgs.length) msgs[msgs.length - 1].remove();
+        streamEl = dockSay("pi", ev.text);
+        piRaw = ev.text;
+      }
     }
     if (!piAnswered) dockSay("pi", "Nessuna risposta: premi “Nuova conversazione” e riprova; se persiste, avvia con JPII_ANALYZER=fake per escludere il sidecar j-pii.");
   } catch (err) {
@@ -799,11 +1017,168 @@ $("dockform").addEventListener("submit", async (e) => {
     typing.remove();
     btn.disabled = false;
     btn.textContent = label;
+    try { refreshLlmLog(); } catch {}
   }
 });
+/* ---------- trasparenza LLM WP4 ---------- */
+async function refreshLlmLog() {
+  try {
+    const rows = await api("/api/llm-log");
+    const box = $("llmlog");
+    const warn = $("llmwarn");
+    $("llmcount").textContent = rows.length ? `(${rows.length})` : "";
+    const bad = rows.find((r) => r.blocked || r.leakSuspect);
+    if (bad) {
+      warn.hidden = false;
+      warn.innerHTML = `⚠️ ${esc(bad.hint || "Verifica invio")} — apri la prima riga e passa a <b>Sensibili (mask)</b> con estensione j-pii.`;
+    } else warn.hidden = true;
+    box.innerHTML = rows.length ? rows.slice(0, 20).map((r) => `<div class="card"><h3>${esc(r.t || "")} · ${esc(r.model || "")}</h3><p>wiki <code>${esc(r.wiki || "—")}</code> voce <code>${esc(r.voce || "—")}</code> · prompt <b class="num">${r.promptChars ?? 0}</b> caratteri · img ${r.images ?? 0} · OCR ${r.ocr ? "sì" : "no"} · mask ${r.sensitive ? "sì" : "no"}</p><p>PII <b class="num">${r.piiCount ?? 0}</b> via ${esc(r.engine || "?")} ${(r.placeholders || []).map((ph) => `<code translate="no">${esc(ph)}</code>`).join(" ")} ${r.blocked ? `<span class="pill warn">bloccata</span>` : ""} ${r.leakSuspect && !r.blocked ? `<span class="pill warn">senza mask</span>` : ""}</p>${r.hint ? `<p class="hint">${esc(r.hint)}</p>` : ""}</div>`).join("") : `<p class="hint">Nessun invio ancora. Scrivi all'agente: qui vedrai caratteri, placeholder e alert, mai valori veri.</p>`;
+  } catch { /* log assente: ignora */ }
+}
 document.querySelectorAll("#chips button").forEach((b) => {
   b.onclick = () => { $("dockin").value = b.dataset.q; $("dockform").requestSubmit(); };
 });
+
+/* ---------- dock dual-mode WP3 ---------- */
+function setDockMode(mode) {
+  const d = $("dock");
+  d.dataset.mode = mode;
+  try { localStorage.setItem("ocr-pi-dockmode", mode); } catch {}
+  const floating = mode === "floating";
+  if (!floating) {
+    // pulizia stili inline di drag/resize popup: altrimenti restano in embedded e rompono il layout
+    d.style.removeProperty("right");
+    d.style.removeProperty("bottom");
+    d.style.removeProperty("left");
+    d.style.removeProperty("top");
+    d.style.removeProperty("width");
+    d.style.removeProperty("height");
+  }
+  $("dockpop").hidden = floating;
+  $("dockpin").hidden = !floating;
+  $("dockassist").setAttribute("aria-expanded", floating || d.classList.contains("open"));
+}
+function initDockMode() {
+  let mode = "embedded";
+  try { mode = localStorage.getItem("ocr-pi-dockmode") || "embedded"; } catch {}
+  if (mode !== "floating") mode = "embedded";
+  setDockMode(mode);
+  $("dockpop").onclick = () => { setDockMode("floating"); $("dock").classList.add("open"); $("dockin").focus(); };
+  $("dockpin").onclick = () => setDockMode("embedded");
+  $("dockassist").onclick = () => {
+    const d = $("dock");
+    if (d.dataset.mode === "floating") setDockMode("embedded");
+    else { setDockMode("floating"); d.classList.add("open"); $("dockin").focus(); }
+  };
+  // drag popup da dockhead (mouse + touch, no librerie)
+  const head = $("dockhead");
+  let sx = 0, sy = 0, ox = 0, oy = 0, drag = false;
+  head.addEventListener("pointerdown", (e) => {
+    if ($("dock").dataset.mode !== "floating") return;
+    if (e.target.closest("button,input,select,textarea")) return;
+    drag = true; sx = e.clientX; sy = e.clientY;
+    const r = $("dock").getBoundingClientRect();
+    ox = window.innerWidth - r.right; oy = window.innerHeight - r.bottom;
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    const d = $("dock");
+    d.style.right = Math.max(8, ox - dx) + "px";
+    d.style.bottom = Math.max(8, oy - dy) + "px";
+    d.style.left = "auto"; d.style.top = "auto";
+  });
+  head.addEventListener("pointerup", () => { drag = false; });
+}
+
+/* ---------- settings + wizard WP5 ---------- */
+async function openSettingsDialog() {
+  const o = opts();
+  const pr = openDialog({
+    title: "Impostazioni",
+    bodyHTML: `<div class="field"><span><label for="s-theme">Tema</label></span><select id="s-theme"><option value="light">Chiaro</option><option value="dark">Scuro</option></select></div>
+      <div class="field"><span><label for="s-engine">Motore OCR default</label></span><select id="s-engine"><option>docling</option><option>fake</option></select><span class="hint">Vale per upload, sorgenti e raw. I modelli restano locali.</span></div>
+      <div class="field"><span><label for="s-pages">Pagine default</label></span><input id="s-pages" autocomplete="off" placeholder="Tutte, es. 1-3"></div>
+      <div class="field"><label><span><input type="checkbox" id="s-deskew"> Raddrizza foto storte di default</span></label></div>
+      <p class="hint" id="s-status">Carico stato…</p>
+      <p class="hint" id="s-ocr">Modelli OCR: … <button class="mini" id="s-warm" type="button">Precarica ora</button></p>
+      <p class="hint">Falsi positivi PII (es. DATE nei nomi file)? Avvia con <code>JPII_EXCLUDE_TAGS=DATE,TIME,BUILDINGNUM,AGE,ZIPCODE</code>.</p>`,
+    actions: [{ label: "Annulla", value: null }, { label: "Salva", kind: "primary", value: "save" }],
+  });
+  // apri subito, riempi stato in background (mai dialog bloccato)
+  setTimeout(async () => {
+    try {
+      const t = document.querySelector("#dlgbody #s-theme"); if (t) t.value = document.documentElement.dataset.theme || "light";
+      const e = document.querySelector("#dlgbody #s-engine"); if (e) e.value = o.engine || "docling";
+      const pg = document.querySelector("#dlgbody #s-pages"); if (pg) pg.value = o.pages || "";
+      const dk = document.querySelector("#dlgbody #s-deskew"); if (dk) dk.checked = !!o.deskew;
+      const [cfg, st] = await Promise.all([api("/api/config").catch(() => ({})), api("/api/status").catch(() => ({}))]);
+      const el = document.querySelector("#dlgbody #s-status");
+      if (el) el.innerHTML = `Modello dock: <code>${esc(cfg.model || "?")}</code> · Cartella lavoro: <code>${esc(st.wikiRoot || cfg.wikiRoot || "?")}</code>${st.needsSetup ? ` · <b>da configurare</b>` : ""} · demone ${st.daemonOk ? "✅" : "…"} · sidecar ${st.sidecarOk ? `✅ ${esc(st.sidecarEngine || "")}` : "… "}`;
+      paintOcrState(st);
+      const w = document.querySelector("#dlgbody #s-warm");
+      if (w) w.onclick = async () => {
+        w.disabled = true; w.textContent = "Precarico…";
+        try { await post("/api/warmup-ocr", {}); toast("Precarico modelli in background: guarda il badge OCR in alto"); } catch (err) { toast("Errore: " + err.message); }
+        try { const s2 = await api("/api/status"); paintOcrState(s2); } catch {}
+        w.disabled = false; w.textContent = "Precarica ora";
+      };
+    } catch {}
+  }, 0);
+  const v = await pr;
+  if (v !== "save") return;
+  const themeV = document.querySelector("#dlgbody #s-theme").value;
+  document.documentElement.dataset.theme = themeV;
+  try { localStorage.setItem("ocr-pi-theme", themeV); } catch {}
+  saveOpts({ engine: document.querySelector("#dlgbody #s-engine").value, pages: document.querySelector("#dlgbody #s-pages").value.trim(), deskew: document.querySelector("#dlgbody #s-deskew").checked });
+  try { const dd = $("dockengine"); if (dd) dd.value = document.querySelector("#dlgbody #s-engine").value; } catch {}
+  toast("Impostazioni salvate");
+}
+function showSetupWizard(status) {
+  state.sel = null; state.card = null;
+  renderCrumbs(null);
+  $("orig").innerHTML = `<div class="card"><h3>Benvenuto — configura la cartella di lavoro</h3><p>L'app ha sempre bisogno di una cartella wiki. Ora punta a <code>${esc(status.wikiRoot || "?")}</code>${status.wikiRootExists ? "" : " (non esiste ancora)"}.</p><ol><li>Crea la prima wiki col bottone sotto.</li><li>Converti un file o aggiungi una cartella sorgente.</li><li>Apri Impostazioni ⚙ per motore e tema.</li></ol><p><button class="btn primary" id="empty-new">Crea la prima wiki…</button> <button class="btn" id="wz-settings">Impostazioni…</button></p></div>`;
+  $("conv").innerHTML = `<div class="empty"><div class="big" aria-hidden="true">📁</div><p>Quando hai una wiki, qui vedrai split Originale|Convertito accoppiati.</p></div>`;
+  $("empty-new").onclick = () => newWikiDialog();
+  $("wz-settings").onclick = () => openSettingsDialog();
+}
+
+/* ---------- ocr badge WP7-bis ---------- */
+function paintOcrState(st) {
+  const b = $("ocrbadge");
+  if (!b) return;
+  const el = document.querySelector("#dlgbody #s-ocr");
+  if (st.ocrReady) {
+    b.textContent = `OCR pronto (${st.ocrEngine || "docling"})`;
+    b.className = "pill ok ready";
+    b.title = "Modelli OCR caricati: converti senza attesa";
+    if (el) el.innerHTML = `Modelli OCR: ✅ pronti (${esc(st.ocrEngine || "")}) <button class="mini" id="s-warm2" type="button">Ricarica</button>`;
+  } else if (st.ocrLoading) {
+    b.textContent = "OCR carico…";
+    b.className = "pill warn loading";
+    b.title = "Carico modelli OCR in background: puoi lavorare, ti avviso quando pronto";
+    if (el) el.firstChild.textContent = "Modelli OCR: ⏳ carico in background… ";
+  } else if (st.ocrError) {
+    b.textContent = "OCR da caricare";
+    b.className = "pill warn";
+    b.title = `Non pronto: ${st.ocrError.slice(0, 120)}. Premi per precaricare`;
+    if (el) el.innerHTML = `Modelli OCR: ⚠️ ${esc(st.ocrError.slice(0, 160))} <button class="mini" id="s-warm3" type="button">Precarica ora</button>`;
+  } else {
+    b.textContent = "OCR …";
+    b.className = "pill";
+    if (el) el.firstChild.textContent = "Modelli OCR: … ";
+  }
+  const w2 = document.querySelector("#dlgbody #s-warm2") || document.querySelector("#dlgbody #s-warm3");
+  if (w2) w2.onclick = async () => { try { await post("/api/warmup-ocr", {}); toast("Precarico modelli in background"); } catch (err) { toast("Errore: " + err.message); } };
+}
+async function refreshOcrBadge() {
+  try {
+    const st = await api("/api/status");
+    paintOcrState(st);
+    return st;
+  } catch { return {}; }
+}
 
 /* ---------- chrome ---------- */
 function initTheme() {
@@ -837,7 +1212,11 @@ $("docktoggle").onclick = (e) => {
   e.currentTarget.textContent = open ? "Riduci agente" : "Espandi agente";
 };
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") document.body.classList.remove("nav");
+  if (e.key === "Escape") {
+    document.body.classList.remove("nav");
+    if ($("dock") && $("dock").dataset.mode === "floating") setDockMode("embedded");
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("gq").focus(); }
 });
 window.addEventListener("hashchange", () => {
@@ -854,6 +1233,17 @@ window.addEventListener("hashchange", () => {
 /* ---------- avvio ---------- */
 (function init() {
   initTheme();
+  try { initDockMode(); } catch {}
+  try { $("settingsbtn").onclick = () => openSettingsDialog(); } catch {}
+  try {
+    $("ocrbadge").onclick = () => openSettingsDialog();
+    refreshOcrBadge();
+    setInterval(async () => {
+      const st = await refreshOcrBadge().catch(() => ({}));
+      if (st.ocrReady && !window._ocrToastDone) { window._ocrToastDone = true; toast("Modelli OCR pronti: ora converti senza attesa"); }
+    }, 5000);
+  } catch {}
+  try { $("llmrefresh").onclick = () => refreshLlmLog(); refreshLlmLog(); } catch {}
   try {
     const o = opts();
     if (o.engine) { const d = $("dockengine"); if (d) d.value = o.engine; }

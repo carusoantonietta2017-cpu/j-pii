@@ -10,6 +10,7 @@ const stubCli = async (args, extra = {}) => {
 	if (args[0] === "list") return [{ slug: "s", voci: 1 }];
 	if (args[0] === "add") return { name: "N", file: "doc/n.md", review: "draft" };
 	if (args[0] === "review") return { name: "N", review: "reviewed" };
+	if (args[0] === "get") return { name: "N", file: "doc/n.md", content: "# N" };
 	throw new Error("comando stub sconosciuto: " + args[0]);
 };
 const stubDaemon = async ({ path }) => ({ markdown: "# " + path, assets: [], pages: 1, engine: "fake", seconds: 0.1 });
@@ -40,4 +41,9 @@ test("ocr_convert da base64", async () => {
 
 test("ocr_convert senza input solleva", async () => {
 	await assert.rejects(tools.ocr_convert({}), /servono path o dataBase64/);
+});
+
+test("wiki_get legge voce in 1 chiamata", async () => {
+	const g = await tools.wiki_get({ wiki: "s", voce: "N" });
+	assert.equal(g.file, "doc/n.md");
 });

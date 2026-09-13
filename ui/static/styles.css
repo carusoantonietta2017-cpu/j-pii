@@ -240,8 +240,10 @@ pre { background: var(--panel-2); padding: 10px; border-radius: 8px; overflow-x:
 
 /* ---------- dock ---------- */
 #dock { border-top: 1px solid var(--border); background: var(--panel); padding-bottom: env(safe-area-inset-bottom); }
-#dockhead { display: flex; align-items: center; gap: 8px; padding: 8px 14px 0; }
-#dockhead h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0; flex: 1; }
+#dockhead { display: flex; align-items: center; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; row-gap: 6px; }
+#dockhead h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#dockmodel { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+#dockhead .mini { flex: none; }
 #docklog { max-height: 150px; overflow-y: auto; padding: 8px 14px; font-size: 14px; display: grid; gap: 4px; overscroll-behavior: contain; }
 #docklog:empty { display: none; }
 #docklog .msg { margin: 2px 0; line-height: 1.45; overflow-wrap: break-word; }
@@ -257,6 +259,14 @@ pre { background: var(--panel-2); padding: 10px; border-radius: 8px; overflow-x:
 #dockopts input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--acc); }
 #dockopts select { padding: 4px 8px; font-size: 13px; }
 #dockfiles { font-size: 12px; color: var(--muted); padding: 0 14px; }
+#ocrbadge { cursor: pointer; }
+#ocrbadge.ready { color: var(--ok); border-color: var(--ok); }
+#ocrbadge.loading { color: var(--warn-ink); border-color: var(--warn-bd); }
+#llmlogbox { margin: 4px 14px 0; font-size: 13px; }
+#llmlogbox summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+#llmlog { display: grid; gap: 8px; margin-top: 6px; max-height: 220px; overflow-y: auto; }
+#llmlog .card { margin: 0; }
+#llmwarn { background: var(--warn-bg); border: 1px solid var(--warn-bd); color: var(--warn-ink); border-radius: 8px; padding: 8px 10px; margin-top: 6px; }
 #dock form { display: flex; gap: 8px; padding: 8px 14px; align-items: center; }
 #dock input[type="text"] { flex: 1; min-width: 0; padding: 11px 12px; font-size: 15px; }
 #docktoggle { width: 100%; border: 0; background: none; padding: 8px; font-size: 13px; color: var(--muted); display: none; cursor: pointer; }
@@ -306,6 +316,25 @@ dialog .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; paddin
   #dock.open #docklog { display: grid; }
   #dock.open #dockfiles { display: block; }
   .top-actions .btn span.lbl { display: none; }
+}
+/* PII highlight stile rizzo-pii (WP2): mark per-label, click per dettagli */
+mark.pii { background: #fef08a; border: 1px solid #eab308; border-radius: 4px; padding: 0 3px; cursor: pointer; }
+mark.pii[data-label="CF"], mark.pii[data-label="PIVA"], mark.pii[data-label="IBAN"] { background: #fecaca; border-color: #dc2626; }
+mark.pii[data-label="EMAIL"], mark.pii[data-label="TELEPHONENUM"] { background: #bfdbfe; border-color: #2563eb; }
+mark.pii[data-label="FULLNAME"] { background: #ddd6fe; border-color: #7c3aed; }
+mark.pii.doubtful { background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 6px, #fde68a 6px, #fde68a 12px); border-style: dashed; }
+html[data-theme="dark"] mark.pii { color: #111; }
+#edithost textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+/* dock dual-mode WP3: embedded in pagina + popup flottante ridimensionabile */
+#dock[data-mode="floating"] { position: fixed; right: 16px; bottom: 16px; width: 420px; max-width: calc(100vw - 32px); min-width: 320px; height: auto; min-height: 320px; max-height: 85vh; display: flex; flex-direction: column; z-index: 40; border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-lg); resize: both; overflow: hidden; }
+#dock[data-mode="floating"] #docklog { flex: 1; min-height: 80px; max-height: none; overflow-y: auto; }
+#dock[data-mode="floating"] #docknew { font-size: 12px; padding: 2px 8px; }
+#dock[data-mode="floating"] #chips { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+#dock[data-mode="floating"] #chips button { flex: none; }
+#dock[data-mode="floating"] #dockhead { cursor: grab; user-select: none; }
+#dock[data-mode="floating"] #dockhead:active { cursor: grabbing; }
+@media (max-width: 800px) {
+  #dock[data-mode="floating"] { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 75vh; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

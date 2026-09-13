@@ -30,6 +30,75 @@ if (!process.env.JPII_PYTHON) {
 
 const daemon = new Daemon();
 
+// WP7-bis warmup OCR reale: precarica modelli docling in background, espone stato
+const ocrState = { loading: false, ready: false, error: "", engine: process.env.UI_WARMUP_ENGINE || "docling", startedAt: 0 };
+export function ocrStatus() { return { ...ocrState }; }
+export async function warmupOcr(force = false) {
+  if (process.env.UI_PREWARM === "0" && !force) return ocrStatus();
+  if (ocrState.loading || (ocrState.ready && !force)) return ocrStatus();
+  ocrState.loading = true; ocrState.ready = false; ocrState.error = "";
+  ocrState.startedAt = Date.now();
+  try {
+    const dir = mkdtempSync(join(tmpdir(), "ocr-pi-warm-"));
+    // PNG 1x1 minimo: basta a far caricare i modelli docling
+    const tiny = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const src = join(dir, "warm.png");
+    writeFileSync(src, tiny);
+    await daemon.convert({ path: src, engine: ocrState.engine, workdir: dir, deskew: false }, process.cwd());
+    ocrState.ready = true;
+    console.log(`[warmup] modelli OCR (${ocrState.engine}) pronti in ${Math.round((Date.now() - ocrState.startedAt) / 1000)}s`);
+  } catch (err) {
+    ocrState.error = err instanceof Error ? err.message : String(err);
+    console.error(`[warmup] OCR non pronto: ${ocrState.error}`);
+  } finally {
+    ocrState.loading = false;
+  }
+  return ocrStatus();
+}
+
+// WP4 trasparenza LLM: storico invii al modello (mai valori veri, solo placeholder e conteggi)
+const llmLog = [];
+function logLlm(entry) {
+  llmLog.unshift({ t: new Date().toISOString(), ...entry });
+  if (llmLog.length > 100) llmLog.length = 100;
+}
+async function maskPreviewForLog(text) {
+  try {
+    const analyzer = process.env.JPII_ANALYZER ?? "real";
+    const sidecarUrl = process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005";
+    if (analyzer !== "fake") {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 8000);
+      try {
+        const r = await fetch(`${sidecarUrl}/analyze`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: String(text).slice(0, 8000), include_mapping: true }), signal: ctl.signal });
+        clearTimeout(timer);
+        if (r.ok) {
+          const data = await r.json();
+          const segs = Array.isArray(data.segments) ? data.segments : [];
+          const out = []; let cursor = 0;
+          const full = String(text);
+          for (const sg of segs) {
+            if (typeof sg.t !== "string" || !sg.t || typeof sg.label !== "string") continue;
+            const i = full.indexOf(sg.t, cursor);
+            if (i === -1) continue;
+            out.push({ start: i, end: i + sg.t.length, label: sg.label });
+            cursor = i + sg.t.length;
+            if (out.length >= 50) break;
+          }
+          return { segments: out, engine: "rizzo-pii" };
+        }
+      } catch { try { clearTimeout(timer); } catch {} }
+    }
+  } catch {}
+  const full = String(text || "");
+  const out = [];
+  for (const pat of [{ re: /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/g, label: "CF" }, { re: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, label: "EMAIL" }]) {
+    let m; while ((m = pat.re.exec(full)) !== null && out.length < 50) out.push({ start: m.index, end: m.index + m[0].length, label: pat.label });
+  }
+  out.sort((a, b) => a.start - b.start);
+  return { segments: out, engine: "fake" };
+}
+
 async function cli(args) {
 	try {
 		const { stdout } = await execFileAsync(
@@ -162,7 +231,113 @@ export function createApp() {
 
 			// GET /api/config (modello dock + radici, per badge UI)
 			if (req.method === "GET" && url.pathname === "/api/config") {
-				return send(res, 200, { model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free" });
+				return send(res, 200, { model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wikiRoot: config.wikiRoot });
+			}
+
+			// POST /api/mask/preview {text} -> segments rizzo-pii (o regex fallback fake)
+			// Usato dall'editor per evidenziare PII come fa rizzo-pii. Mai valori veri in log.
+			if (req.method === "POST" && url.pathname === "/api/mask/preview") {
+				const body = JSON.parse((await readBody(req, 2 * 1024 * 1024)) || "{}");
+				const text = String(body.text ?? "");
+				if (!text) return send(res, 200, { segments: [], engine: "none" });
+				const analyzer = process.env.JPII_ANALYZER ?? "real";
+				const sidecarUrl = process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005";
+				if (analyzer !== "fake") {
+					try {
+						const ctl = new AbortController();
+						const t = setTimeout(() => ctl.abort(), 15000);
+						const r = await fetch(`${sidecarUrl}/analyze`, {
+							method: "POST", headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ text, include_mapping: true }), signal: ctl.signal,
+						});
+						clearTimeout(t);
+						if (r.ok) {
+							const data = await r.json();
+							const segs = Array.isArray(data.segments) ? data.segments : [];
+							// segments -> detections con offset (cursor in ordine documento)
+							const out = [];
+							let cursor = 0;
+							for (const s of segs) {
+								if (typeof s.t !== "string" || !s.t || typeof s.label !== "string") continue;
+								const i = text.indexOf(s.t, cursor);
+								if (i === -1) continue;
+								out.push({ start: i, end: i + s.t.length, label: s.label, validated: s.validated });
+								cursor = i + s.t.length;
+								if (out.length >= 200) break;
+							}
+							return send(res, 200, { segments: out, engine: "rizzo-pii" });
+						}
+					} catch {
+						/* sidecar assente: fallback regex sotto */
+					}
+				}
+				// fallback fake: CF + EMAIL come j-pii fakeAnalyzer
+				const out = [];
+				const pats = [
+					{ re: /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/g, label: "CF" },
+					{ re: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, label: "EMAIL" },
+				];
+				for (const p of pats) {
+					let m;
+					while ((m = p.re.exec(text)) !== null && out.length < 200) {
+						out.push({ start: m.index, end: m.index + m[0].length, label: p.label, validated: true });
+					}
+				}
+				out.sort((a, b) => a.start - b.start);
+				return send(res, 200, { segments: out, engine: "fake" });
+			}
+
+			// GET /api/status (workdir + warmup WP7: mai lento, best-effort con timeout corti)
+			if (req.method === "GET" && url.pathname === "/api/status") {
+				let wikiRootExists = false;
+				let wikisCount = 0;
+				try {
+					const st = await stat(join(config.wikiRoot, "wiki"));
+					wikiRootExists = st.isDirectory();
+					if (wikiRootExists) {
+						const out = await cli(["list"]);
+						wikisCount = Array.isArray(out) ? out.length : 0;
+					}
+				} catch {
+					wikiRootExists = false;
+				}
+				let daemonOk = false;
+				try { daemon.ensure(process.cwd()); daemonOk = true; } catch {}
+				let sidecarOk = false;
+				let sidecarEngine = process.env.JPII_ANALYZER === "fake" ? "fake" : "unknown";
+				if (process.env.JPII_ANALYZER === "fake") sidecarOk = true;
+				else {
+					try {
+						const ctl = new AbortController();
+						const t = setTimeout(() => ctl.abort(), 1500);
+						const hr = await fetch(`${process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005"}/health`, { signal: ctl.signal });
+						clearTimeout(t);
+						sidecarOk = hr.ok;
+						if (hr.ok) sidecarEngine = "rizzo-pii";
+					} catch {}
+				}
+				return send(res, 200, { wikiRoot: config.wikiRoot, wikiRootExists, wikisCount, needsSetup: !wikiRootExists || wikisCount === 0, daemonOk, sidecarOk, sidecarEngine, ocrReady: ocrState.ready, ocrLoading: ocrState.loading, ocrError: ocrState.error, ocrEngine: ocrState.engine });
+			}
+
+			// POST /api/warmup-ocr (WP7-bis: precarica modelli ora, background)
+			if (req.method === "POST" && url.pathname === "/api/warmup-ocr") {
+				warmupOcr(true).catch(() => {});
+				return send(res, 200, ocrStatus());
+			}
+
+			// GET /api/version (WP6 hardening: release tracciabile)
+			if (req.method === "GET" && url.pathname === "/api/version") {
+				let sha = "";
+				try {
+					const { stdout } = await execFileAsync("git", ["rev-parse", "--short", "HEAD"], { cwd: process.cwd(), timeout: 5000 });
+					sha = String(stdout).trim();
+				} catch {}
+				return send(res, 200, { name: "ocr-pi-ui", version: "0.1.0", sha, date: new Date().toISOString() });
+			}
+
+			// GET /api/llm-log (WP4: storico masked, mai valori veri)
+			if (req.method === "GET" && url.pathname === "/api/llm-log") {
+				return send(res, 200, llmLog);
 			}
 
 			// GET /api/search?q=&stato=&wiki=  (ricerca globale sopra cli search)
@@ -196,21 +371,36 @@ export function createApp() {
 			}
 
 			// GET /api/wiki/:slug/file?path=doc/x.md  (confinato alla wiki)
-			if (req.method === "GET" && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "file") {
+			if ((req.method === "GET" || req.method === "PUT") && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "file") {
 				const dir = join(config.wikiRoot, "wiki", decodeURIComponent(seg[2]));
 				const rel = (url.searchParams.get("path") ?? "").replace(/\\/g, "/");
 				const file = normalize(join(dir, rel));
 				if (rel.includes("..") || (file !== dir && !file.startsWith(dir + sep))) {
 					return send(res, 403, { error: "fuori dalla wiki" });
 				}
-				try {
-					if (!(await stat(file)).isFile()) return send(res, 404, { error: "non trovato" });
-					const ext = extname(file);
-					res.writeHead(200, { "Content-Type": MIME[ext] ?? "application/octet-stream" });
-					return res.end(await readFile(file));
-				} catch {
-					return send(res, 404, { error: "non trovato" });
+				if (req.method === "GET") {
+					try {
+						if (!(await stat(file)).isFile()) return send(res, 404, { error: "non trovato" });
+						const ext = extname(file);
+						res.writeHead(200, { "Content-Type": MIME[ext] ?? "application/octet-stream" });
+						return res.end(await readFile(file));
+					} catch {
+						return send(res, 404, { error: "non trovato" });
+					}
 				}
+				// PUT: salva editor (solo doc/*.md, preserva pairing raw via manager.update-file)
+				if (!rel.startsWith("doc/") || !rel.endsWith(".md")) {
+					return send(res, 400, { error: "solo doc/*.md editabili" });
+				}
+				const body = JSON.parse((await readBody(req, 4 * 1024 * 1024)) || "{}");
+				if (typeof body.markdown !== "string" || !body.markdown.trim()) {
+					return send(res, 400, { error: "markdown vuoto" });
+				}
+				const slug = decodeURIComponent(seg[2]);
+				const tmp = mkdtempSync(join(tmpdir(), "ocr-pi-put-"));
+				const tmpFile = join(tmp, "voce.md");
+				writeFileSync(tmpFile, body.markdown);
+				return send(res, 200, await cli(["update-file", slug, rel, tmpFile]));
 			}
 
 			// GET /api/wiki/:slug/trash  (voci cestinate, recuperabili a mano da trash/)
@@ -395,6 +585,37 @@ export function createApp() {
 				const op = seg[3];
 				if (op === "add") {
 					let file = body.file ?? "";
+				let rawTmp = "";
+				// raw da upload (bytes) oppure da path server consentito (sorgenti/wiki)
+				if (body.rawName && body.rawDataBase64) {
+					const rdir = mkdtempSync(join(tmpdir(), "ocr-pi-raw-"));
+				rawTmp = join(rdir, String(body.rawName).split("/").pop().replace(/[^\w.\-]+/g, "_"));
+					writeFileSync(rawTmp, Buffer.from(body.rawDataBase64, "base64"));
+				} else if (body.rawWiki && body.rawFile) {
+                    const rw = String(body.rawWiki).replace(/\\/g, "/");
+                    const rf = String(body.rawFile).replace(/\\/g, "/").split("/").pop();
+                    if (!rw || !rf || rw.includes("..") || rf.includes("..")) return send(res, 400, { error: "raw non valido" });
+                    const rp2 = normalize(join(config.wikiRoot, "wiki", rw, "raw", rf));
+                    const wdir2 = normalize(join(config.wikiRoot, "wiki", rw));
+                    if (rp2 !== wdir2 && !rp2.startsWith(wdir2 + sep)) return send(res, 403, { error: "raw fuori dalla wiki" });
+                    try {
+                        if (!(await stat(rp2)).isFile()) return send(res, 404, { error: "raw assente" });
+                    } catch {
+                        return send(res, 404, { error: "raw assente" });
+                    }
+                    rawTmp = rp2;
+                } else if (body.rawPath) {
+					const rp = normalize(String(body.rawPath).replace(/\\/g, "/"));
+					const roots = [resolve(config.wikiRoot), ...(await readSources()).map((s) => normalize(resolve(String(s))))];
+					const inside = roots.some((r) => rp === r || rp.startsWith(r + sep));
+					if (!inside) return send(res, 403, { error: "raw fuori dalle cartelle consentite" });
+					try {
+						if (!(await stat(rp)).isFile()) return send(res, 404, { error: "raw assente" });
+					} catch {
+						return send(res, 404, { error: "raw assente" });
+					}
+					rawTmp = rp;
+				}
 					if (!file && body.markdown) {
 						const dir = mkdtempSync(join(tmpdir(), "ocr-pi-add-"));
 						for (const a of body.assets ?? []) {
@@ -408,7 +629,11 @@ export function createApp() {
 					if (!file) return send(res, 400, { error: "servono file o markdown" });
 					const args = ["add", slug, file];
 					if (body.title) args.push("--titolo", body.title);
+					if (rawTmp) args.push("--raw", rawTmp);
 					return send(res, 200, await cli(args));
+				}
+				if (op === "link-raw") {
+					return send(res, 200, await cli(["link-raw", slug]));
 				}
 				if (op === "review") {
 					if (!body.voce || !body.stato) return send(res, 400, { error: "servono voce e stato" });
@@ -453,7 +678,15 @@ export function createApp() {
 						say({ type: "done" });
 						return res.end();
 					}
+					const ctx = body.context && typeof body.context === "object" ? body.context : {};
+					const ctxWiki = String(ctx.wiki || "").slice(0, 64);
+					const ctxVoce = String(ctx.voce || "").slice(0, 128);
 					let prompt = body.message ?? "";
+					if (ctxWiki || ctxVoce) {
+						prompt = `[Contesto wiki${ctxWiki ? ` "${ctxWiki}"` : ""}${ctxVoce ? ` voce "${ctxVoce}"` : ""}. Strumenti: wiki_get per leggere una voce nota (1 chiamata), wiki_search solo per trovare, wiki_list per elencare. Mai raw/, mai path assoluti: gli originali restano locali, usa la trascrizione md. Masking PII automatico via j-pii: rispondi normalmente e riporta fedelmente i placeholder che i tool restituiscono ([CF_1], [FULLNAME_1]...), senza inventarne altri tipo <placeholder>. Per creare: wiki_add con titolo e markdown veri e completi.]\n\n` + prompt;
+					} else {
+						prompt = `[Contesto wiki non selezionata. Strumenti: wiki_get per voce nota, wiki_search per trovare, wiki_list per elencare. Mai raw/. Masking automatico: riporta i placeholder reali, non inventarli.]\n\n` + prompt;
+					}
 					const sdkImages = [];
 					for (const img of images) {
 						if (body.ocr) {
@@ -467,15 +700,18 @@ export function createApp() {
 						}
 					}
 					const dockCli = async (args, extra = {}) => {
+						const flat = (args || []).join(" ");
+						if (/\braw\//.test(flat) || flat.includes("..")) throw new Error("Originali non esposti al modello: usa la trascrizione doc/*.md collegata");
 						if (extra.markdown) {
-							// wiki_add via agent: ["add", wiki, file?, --titolo?] -> file da markdown
+							// wiki_add via agent: ["add", wiki, file?, --titolo?] -> file da markdown (filtra stringhe vuote: bug add)
 							const dir = mkdtempSync(join(tmpdir(), "ocr-pi-dockadd-"));
 							const file = join(dir, "voce.md");
 							writeFileSync(file, extra.markdown);
 							const head = args.slice(0, 2);
-							return cli([...head, file, ...args.slice(2)]);
+							const tail = (args.slice(2) || []).filter((a) => String(a ?? "").trim() !== "");
+							return cli([...head, file, ...tail]);
 						}
-						return cli(args);
+						return cli((args || []).filter((a) => String(a ?? "").trim() !== ""));
 					};
 					const sessionOpts = {
 						cli: dockCli,
@@ -485,18 +721,45 @@ export function createApp() {
 					};
 					const timeoutMs = Number(process.env.UI_CHAT_TIMEOUT_MS ?? 180000);
 					const jpiNotes = [];
+					let preSegs = [];
+					let preEngine = "none";
+					try {
+						const pre = await maskPreviewForLog(prompt);
+						preSegs = pre.segments || [];
+						preEngine = pre.engine || "none";
+					} catch {}
+					const phByLabel = {};
+					for (const sg of preSegs) phByLabel[sg.label] = (phByLabel[sg.label] || 0) + 1;
+					const placeholders = Object.entries(phByLabel).map(([k, n]) => `[${k}_x${n}]`);
+					const leakSuspect = preSegs.length > 0 && !body.sensitive;
+					let maskedSnippet = String(prompt).slice(0, 300);
+					try {
+						const vals = [...new Set(preSegs.map((sg) => String(prompt).slice(sg.start, sg.end)).filter(Boolean))].sort((a, b) => b.length - a.length).slice(0, 20);
+						for (const v of vals) maskedSnippet = maskedSnippet.split(v).join("[PII]");
+					} catch {}
 					const origConsoleError = console.error;
+					let streamedRaw = "";
+					let restoredText = "";
 					const runOnce = async () => {
 						const session = await getSession(sessionOpts);
 						let innerGot = false;
+						streamedRaw = ""; restoredText = "";
 						session.subscribe((event) => {
 							if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
 								innerGot = true;
+								streamedRaw += event.assistantMessageEvent.delta;
 								say({ type: "text_delta", delta: event.assistantMessageEvent.delta });
 							}
 							if (event.type === "tool_execution_start") {
 								innerGot = true;
 								say({ type: "tool", tool: event.toolName });
+							}
+							if (event.type === "message_end" && event.message && event.message.role === "assistant") {
+								try {
+									const blocks = Array.isArray(event.message.content) ? event.message.content : [];
+									const txt = blocks.filter((b) => b && b.type === "text" && typeof b.text === "string").map((b) => b.text).join("");
+									if (txt.trim()) { innerGot = true; restoredText = txt; say({ type: "restored", text: txt }); }
+								} catch {}
 							}
 						});
 						let timer;
@@ -528,6 +791,7 @@ export function createApp() {
 							resetSession();
 							console.error("[dock] prompt senza risposta dopo " + timeoutMs + " ms: sessione azzerata");
 							say({ type: "text_delta", delta: "Nessuna risposta entro " + Math.round(timeoutMs / 1000) + " secondi: ho azzerato la conversazione. Riprova con un messaggio semplice; se persiste, prova JPII_ANALYZER=fake o un altro modello via UI_MODEL." });
+							logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: preEngine, placeholders, piiCount: preSegs.length, leakSuspect, blocked: true, hint: "Timeout: sessione azzerata" });
 							say({ type: "done" });
 							return res.end();
 						}
@@ -539,9 +803,25 @@ export function createApp() {
 							throw err;
 						}
 					}
+					let streamPH = [];
+					try {
+						const m = String(streamedRaw).match(/\[[A-Z]+_\d+\]/g) || [];
+						streamPH = [...new Set(m)];
+					} catch {}
+					let finalPH = placeholders;
+					let finalCount = preSegs.length;
+					let finalEngine = preEngine;
+					if (streamPH.length) {
+						finalPH = streamPH.map((ph) => `${ph} inviato codificato`);
+						finalCount = streamPH.length;
+						finalEngine = preEngine === "none" ? "j-pii" : preEngine;
+					}
+					const blocked = !gotContent;
 					if (!gotContent) {
 						say({ type: "text_delta", delta: jpiBlockMessage(jpiNotes) });
+						say({ type: "log", event: "jpi-block" });
 					}
+					logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: finalEngine, placeholders: finalPH, piiCount: finalCount, leakSuspect: leakSuspect && !streamPH.length, blocked, hint: blocked ? "Bloccata da j-pii: apri Trasparenza per motivo e passa a mask" : streamPH.length ? `Inviati codificati ${streamPH.length} placeholder, vedi valori in chiaro in chat` : leakSuspect ? "PII rilevata senza mask: attiva Sensibili (mask) o verifica placeholders" : "" });
 					say({ type: "done" });
 					return res.end();
 				} catch (err) {
@@ -560,9 +840,24 @@ export function createApp() {
 	return server;
 }
 
+export function prewarm() {
+	if (process.env.UI_PREWARM === "0") return;
+	try { daemon.ensure(process.cwd()); } catch {}
+	try { warmupOcr().catch(() => {}); } catch {}
+	if ((process.env.JPII_ANALYZER ?? "real") !== "fake") {
+		const url = `${process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005"}/health`;
+		const ctl = new AbortController();
+		const t = setTimeout(() => { try { ctl.abort(); } catch {} }, 2000);
+		fetch(url, { signal: ctl.signal }).catch(() => {}).finally(() => clearTimeout(t));
+	}
+}
+
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
 	const { mkdirSync } = await import("node:fs");
 	mkdirSync(join(config.wikiRoot, "wiki"), { recursive: true });
-	createApp().listen(config.port, () => console.log(`ocr-pi ui su http://localhost:${config.port} (wiki: ${config.wikiRoot})`));
+	createApp().listen(config.port, () => {
+		console.log(`ocr-pi ui su http://localhost:${config.port} (wiki: ${config.wikiRoot})`);
+		prewarm();
+	});
 }

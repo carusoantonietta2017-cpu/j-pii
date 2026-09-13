@@ -17,6 +17,32 @@ from pathlib import Path
 
 IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 SKILL_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+FRONT_RE = re.compile(r"^---\n(.*?)\n---\n", re.S)
+
+
+def strip_frontmatter(md: str) -> str:
+    """Rimuove il frontmatter YAML iniziale, se presente."""
+    return FRONT_RE.sub("", md, count=1) if md.startswith("---\n") else md
+
+
+def parse_frontmatter(md: str) -> dict:
+    """Parsa il frontmatter iniziale in dict semplice chiave: valore."""
+    m = FRONT_RE.match(md)
+    if not m:
+        return {}
+    out = {}
+    for line in m.group(1).splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def with_frontmatter(body: str, fields: dict) -> str:
+    """Prepende frontmatter YAML a body, rimuovendo eventuale frontmatter esistente."""
+    body = strip_frontmatter(body).lstrip("\n")
+    head = "---\n" + "\n".join(f"{k}: {v}" for k, v in fields.items()) + "\n---\n\n"
+    return head + body
 
 
 @dataclass
@@ -94,13 +120,22 @@ def write_wiki(docs, slug, root=".", include_raw=True) -> Path:
                 shutil.copy2(a, dest)
                 copied[a.name] = dest.name
         md = _rewrite_images(doc.markdown, copied)
-        (doc_dir / f"{vname}.md").write_text(md, encoding="utf-8")
+        raw_name = ""
         if include_raw and doc.source and Path(doc.source).exists():
-            shutil.copy2(doc.source, raw_dir / Path(doc.source).name)
+            raw_name = Path(doc.source).name
+            shutil.copy2(doc.source, raw_dir / raw_name)
+        # frontmatter pairing: la corrispondenza originale<->md vive nel wiki stesso
+        fm = {"wiki": slug, "voce": doc.name, "engine": doc.engine or "?",
+              "pages": str(doc.pages or 0)}
+        if raw_name:
+            fm["source"] = f"../raw/{raw_name}"
+        md = with_frontmatter(md, fm)
+        (doc_dir / f"{vname}.md").write_text(md, encoding="utf-8")
         index_rows.append(f"| {doc.name} | doc/{vname}.md | draft | {doc.pages} |")
         meta_docs.append({"name": doc.name, "file": f"doc/{vname}.md",
                           "pages": doc.pages, "engine": doc.engine,
-                          "seconds": round(doc.seconds, 2), "review": "draft"})
+                          "seconds": round(doc.seconds, 2), "review": "draft",
+                          "raw": f"raw/{raw_name}" if raw_name else ""})
 
     titles = ", ".join(d.name for d in docs) if docs else "in allestimento"
     skill_md = (
@@ -145,3 +180,37 @@ def export_wiki(wiki_path, senza_raw=False) -> Path:
                 continue
             z.write(f, f"{wiki.name}/{rel.as_posix()}")
     return zip_path
+
+
+def stem_of(name: str) -> str:
+    """Stem normalizzato per il match raw<->doc (stessa regola UI slugStem)."""
+    base = re.sub(r"\.[^.]+$", "", str(name))
+    return slugify(base)
+
+
+def resolve_pair(meta_docs: list, raw_names: list, identifier: str) -> dict:
+    """Risolve Pair{doc,raw} da un identificatore doc-file, voce o raw-name.
+    Preferisce il campo meta `raw`, fallback allo stem match."""
+    ident = str(identifier)
+    # 1) match diretto doc file o nome voce
+    for d in meta_docs:
+        if ident in (d.get("file"), d.get("name"), Path(d.get("file", "")).stem):
+            raw = d.get("raw") or ""
+            if not raw:
+                st = stem_of(Path(d.get("file", "")).name)
+                for r in raw_names:
+                    if stem_of(r) == st or stem_of(d.get("name", "")) == stem_of(r):
+                        raw = f"raw/{r}" if not r.startswith("raw/") else r
+                        break
+            return {"doc": d.get("file"), "raw": raw, "name": d.get("name")}
+    # 2) match raw -> doc
+    rbase = ident.split("/")[-1]
+    for d in meta_docs:
+        if (d.get("raw") or "").split("/")[-1] == rbase:
+            return {"doc": d.get("file"), "raw": d.get("raw"), "name": d.get("name")}
+    for d in meta_docs:
+        if stem_of(Path(d.get("file", "")).name) == stem_of(rbase) or \
+           stem_of(d.get("name", "")) == stem_of(rbase):
+            raw = d.get("raw") or f"raw/{rbase}"
+            return {"doc": d.get("file"), "raw": raw, "name": d.get("name")}
+    return {"doc": "", "raw": f"raw/{rbase}" if rbase else "", "name": ""}
