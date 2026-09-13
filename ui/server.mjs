@@ -738,12 +738,16 @@ export function createApp() {
 						for (const v of vals) maskedSnippet = maskedSnippet.split(v).join("[PII]");
 					} catch {}
 					const origConsoleError = console.error;
+					let streamedRaw = "";
+					let restoredText = "";
 					const runOnce = async () => {
 						const session = await getSession(sessionOpts);
 						let innerGot = false;
+						streamedRaw = ""; restoredText = "";
 						session.subscribe((event) => {
 							if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
 								innerGot = true;
+								streamedRaw += event.assistantMessageEvent.delta;
 								say({ type: "text_delta", delta: event.assistantMessageEvent.delta });
 							}
 							if (event.type === "tool_execution_start") {
@@ -754,7 +758,7 @@ export function createApp() {
 								try {
 									const blocks = Array.isArray(event.message.content) ? event.message.content : [];
 									const txt = blocks.filter((b) => b && b.type === "text" && typeof b.text === "string").map((b) => b.text).join("");
-									if (txt.trim()) { innerGot = true; say({ type: "restored", text: txt }); }
+									if (txt.trim()) { innerGot = true; restoredText = txt; say({ type: "restored", text: txt }); }
 								} catch {}
 							}
 						});
@@ -799,12 +803,25 @@ export function createApp() {
 							throw err;
 						}
 					}
+					let streamPH = [];
+					try {
+						const m = String(streamedRaw).match(/\[[A-Z]+_\d+\]/g) || [];
+						streamPH = [...new Set(m)];
+					} catch {}
+					let finalPH = placeholders;
+					let finalCount = preSegs.length;
+					let finalEngine = preEngine;
+					if (streamPH.length) {
+						finalPH = streamPH.map((ph) => `${ph} inviato codificato`);
+						finalCount = streamPH.length;
+						finalEngine = preEngine === "none" ? "j-pii" : preEngine;
+					}
 					const blocked = !gotContent;
 					if (!gotContent) {
 						say({ type: "text_delta", delta: jpiBlockMessage(jpiNotes) });
 						say({ type: "log", event: "jpi-block" });
 					}
-					logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: preEngine, placeholders, piiCount: preSegs.length, leakSuspect, blocked, hint: blocked ? "Bloccata da j-pii: apri Trasparenza per motivo e passa a mask" : leakSuspect ? "PII rilevata senza mask: attiva Sensibili (mask) o verifica placeholders" : "" });
+					logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: finalEngine, placeholders: finalPH, piiCount: finalCount, leakSuspect: leakSuspect && !streamPH.length, blocked, hint: blocked ? "Bloccata da j-pii: apri Trasparenza per motivo e passa a mask" : streamPH.length ? `Inviati codificati ${streamPH.length} placeholder, vedi valori in chiaro in chat` : leakSuspect ? "PII rilevata senza mask: attiva Sensibili (mask) o verifica placeholders" : "" });
 					say({ type: "done" });
 					return res.end();
 				} catch (err) {
