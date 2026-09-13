@@ -1,5 +1,8 @@
-/* ocr-pi PWA hardening WP6: cache statici locale, mai /api/ in cache. */
-const CACHE = "ocr-pi-v1";
+/* ocr-pi PWA hardening WP6: cache statici locale, mai /api/ in cache.
+ * IMPORTANTE: a ogni modifica di index.html/styles.css/app.js/icon.svg/manifest.json
+ * bumpa CACHE (v2 -> v3 ...): il browser reinstalla il SW solo se sw.js cambia,
+ * e con cache-first un nome fermo servirebbe JS stanco per sempre (dock restore). */
+const CACHE = "ocr-pi-v2";
 const CORE = ["./", "./index.html", "./styles.css", "./app.js", "./icon.svg", "./manifest.json"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));

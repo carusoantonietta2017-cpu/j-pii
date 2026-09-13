@@ -10,6 +10,13 @@ test("defaults: real analyzer, python3, port 5005, no exclusions", () => {
 	assert.equal(c.port, 5005);
 	assert.deepEqual(c.excludeLabels, []);
 	assert.equal(c.sidecarUrl, "http://127.0.0.1:5005");
+	assert.equal(c.autoMaskDoubtful, false);
+});
+
+test("auto-mask doubtful opt-in for headless dock", () => {
+	assert.equal(resolveConfig({}).autoMaskDoubtful, false);
+	assert.equal(resolveConfig({ JPII_AUTO_MASK_DOUBTFUL: "1" }).autoMaskDoubtful, true);
+	assert.equal(resolveConfig({ JPII_AUTO_MASK_DOUBTFUL: "0" }).autoMaskDoubtful, false);
 });
 
 test("explicit fake analyzer for offline/tests", () => {

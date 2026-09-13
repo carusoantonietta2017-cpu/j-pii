@@ -784,24 +784,34 @@ export function createApp() {
 						return innerGot;
 					};
 					let gotContent;
+					// Dock headless: niente TUI per la revisione dei casi dubbi. Con
+					// Sensibili (mask) l'utente ha già dato consenso alla mask: i doubtful
+					// vengono forzati (fail-safe, mai in chiaro) invece di bloccare.
+					const prevAutoMask = process.env.JPII_AUTO_MASK_DOUBTFUL;
+					if (body.sensitive) process.env.JPII_AUTO_MASK_DOUBTFUL = "1";
 					try {
-						gotContent = await runOnce();
-					} catch (err) {
-						if (err && err.code === "CHAT_TIMEOUT") {
-							resetSession();
-							console.error("[dock] prompt senza risposta dopo " + timeoutMs + " ms: sessione azzerata");
-							say({ type: "text_delta", delta: "Nessuna risposta entro " + Math.round(timeoutMs / 1000) + " secondi: ho azzerato la conversazione. Riprova con un messaggio semplice; se persiste, prova JPII_ANALYZER=fake o un altro modello via UI_MODEL." });
-							logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: preEngine, placeholders, piiCount: preSegs.length, leakSuspect, blocked: true, hint: "Timeout: sessione azzerata" });
-							say({ type: "done" });
-							return res.end();
-						}
-						if (/already processing/i.test((err && err.message) || "")) {
-							resetSession();
-							console.error("[dock] sessione incastrata, riprovo da zero");
+						try {
 							gotContent = await runOnce();
-						} else {
-							throw err;
+						} catch (err) {
+							if (err && err.code === "CHAT_TIMEOUT") {
+								resetSession();
+								console.error("[dock] prompt senza risposta dopo " + timeoutMs + " ms: sessione azzerata");
+								say({ type: "text_delta", delta: "Nessuna risposta entro " + Math.round(timeoutMs / 1000) + " secondi: ho azzerato la conversazione. Riprova con un messaggio semplice; se persiste, prova JPII_ANALYZER=fake o un altro modello via UI_MODEL." });
+								logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: preEngine, placeholders, piiCount: preSegs.length, leakSuspect, blocked: true, hint: "Timeout: sessione azzerata" });
+								say({ type: "done" });
+								return res.end();
+							}
+							if (/already processing/i.test((err && err.message) || "")) {
+								resetSession();
+								console.error("[dock] sessione incastrata, riprovo da zero");
+								gotContent = await runOnce();
+							} else {
+								throw err;
+							}
 						}
+					} finally {
+						if (prevAutoMask === undefined) delete process.env.JPII_AUTO_MASK_DOUBTFUL;
+						else process.env.JPII_AUTO_MASK_DOUBTFUL = prevAutoMask;
 					}
 					let streamPH = [];
 					try {
@@ -821,7 +831,8 @@ export function createApp() {
 						say({ type: "text_delta", delta: jpiBlockMessage(jpiNotes) });
 						say({ type: "log", event: "jpi-block" });
 					}
-					logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: finalEngine, placeholders: finalPH, piiCount: finalCount, leakSuspect: leakSuspect && !streamPH.length, blocked, hint: blocked ? "Bloccata da j-pii: apri Trasparenza per motivo e passa a mask" : streamPH.length ? `Inviati codificati ${streamPH.length} placeholder, vedi valori in chiaro in chat` : leakSuspect ? "PII rilevata senza mask: attiva Sensibili (mask) o verifica placeholders" : "" });
+					const autoMaskNotes = jpiNotes.filter((l) => l.includes("doubtful auto-masked"));
+					logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: finalEngine, placeholders: finalPH, piiCount: finalCount, leakSuspect: leakSuspect && !streamPH.length, blocked, hint: blocked ? "Bloccata da j-pii: apri Trasparenza per motivo e passa a mask" : streamPH.length ? `Inviati codificati ${streamPH.length} placeholder, vedi valori in chiaro in chat${autoMaskNotes.length ? " · casi dubbi auto-masch... (dettagli nel log server)" : ""}` : leakSuspect ? "PII rilevata senza mask: attiva Sensibili (mask) o verifica placeholders" : "" });
 					say({ type: "done" });
 					return res.end();
 				} catch (err) {

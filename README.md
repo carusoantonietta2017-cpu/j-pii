@@ -268,7 +268,7 @@ Atteso zero `fail` + tsc silenzioso.
 cd ui && node --test server.test.mjs dock.test.mjs 2>&1 | grep -E "^# (tests|pass|fail)"
 ```
 
-Atteso `tests 20`, zero `fail`: statici + `dockform`, 404/traversal,
+Atteso `tests 28`, zero `fail`: statici + `dockform`, 404/traversal,
 create/add/search/review, errori JSON, sources, convert fake via demone (con
 asset inline), `convert-raw` da wiki, `GET /api/file` confinato a wiki e
 sorgenti, dettaglio/file/export/rename, convert-upload, `chat/new`, guard
@@ -313,7 +313,7 @@ contenente CF veri in chiaro, telefoni e nomi. Esempio minimo:
 | ID | Nome e Cognome | Codice Fiscale | Telefono |
 | --- | --- | --- | --- |
 | 1 | Rossi Mario | RSSMRA80A01H501U | +39 333 1234567 |
-| 2 | Bianchi Laura | BNCLRA85M52F205X | +39 347 9876543 |
+| 2 | Bianchi Laura | BNCLRA85M52F205I | +39 347 9876543 |
 ```
 
 **Passo 1 — seleziona la voce giusta.** Click su `cfsens` in sidebar.
@@ -326,15 +326,22 @@ accoppiato se c'è.
 `Sensibili (mask)`, premi `Nuova conversazione` per pulire contesto e
 mapping vecchi, poi scrivi `leggi doc/cfsens.md e mostrami come tabella
 markdown`. Atteso: 1 solo `(uso wiki_get…)` e tabella **formattata** con
-CF, nomi e telefoni **in chiaro**.
+CF, nomi e telefoni **in chiaro**. Col motore reale i casi dubbi
+(nomi, telefoni: il rilevatore non li valida) vengono auto-masch... dal
+dock — niente domanda di revisione, nel dock non c'è TUI per rispondere —
+e li rivedi in chiaro comunque grazie al restore locale.
 
 ![Tabella in chiaro nel dock](docs/shots/prove-cfsens/02-dock-tabella-chiara.png)
 
 **Passo 3 — verifica cosa è partito.** Sotto il dock apri
-`Trasparenza: cosa vede l'LLM` e premi `Aggiorna log`. Atteso: ultima riga
-con `PII 2 via fake [CF_1] inviato codificato [CF_2] inviato codificato` e
-`Inviati codificati 2 placeholder, vedi valori in chiaro in chat`. Nel log
-mai valori veri, solo conteggi e segnaposto.
+`Trasparenza: cosa vede l'LLM` e premi `Aggiorna log`. Atteso col motore
+reale: ultima riga con `PII N via rizzo-pii` (tutti i segnaposto inviati
+codificati: `[CF_1] … [FULLNAME_1] … [TELEPHONENUM_1] …`, tanti quante sono
+le entità nella voce) e hint `Inviati codificati … placeholder, vedi valori
+in chiaro in chat · casi dubbi auto-masch...`. Col motore `fake` (solo
+CF/email via regex) sulla tabella minima della Preparazione: `PII 2 via
+fake [CF_1] inviato codificato [CF_2] inviato codificato`. Nel log mai
+valori veri, solo conteggi e segnaposto.
 
 ![Log con placeholder codificati](docs/shots/prove-cfsens/03-log-codificati.png)
 

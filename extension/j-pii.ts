@@ -4,7 +4,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { restore, restoreDeep, type Analyzer, type DoubtfulSpan } from "./mask.ts";
 import { createSessionStore, type SessionStore } from "./store.ts";
-import { reviewDoubtful } from "./review.ts";
+import { reviewDoubtful, type ReviewDecision } from "./review.ts";
 import { rizzoAnalyzer } from "./rizzo.ts";
 import { resolveConfig } from "./config.ts";
 import { ensureSidecar, type ManagedSidecar } from "./sidecar.ts";
@@ -210,6 +210,25 @@ function applyForced(value: unknown, forced: Map<string, string>): unknown {
 	return value;
 }
 
+/** Fresh-doubtful resolution shared by the interactive hook and headless callers.
+ *  autoMask=true force-masks every fresh span (fail-safe: the dock has no TUI
+ *  to answer the review prompt, so asking would always fail closed). Only
+ *  labels and counts reach the log here, never values. */
+export async function resolveFreshDoubtful(
+	fresh: DoubtfulSpan[],
+	opts: { autoMask: boolean; decide: (span: DoubtfulSpan) => Promise<ReviewDecision> },
+): Promise<{ force: DoubtfulSpan[]; cleared: DoubtfulSpan[]; autoMasked: boolean }> {
+	if (opts.autoMask && fresh.length > 0) {
+		const byLabel = new Map<string, number>();
+		for (const span of fresh) byLabel.set(span.label, (byLabel.get(span.label) ?? 0) + 1);
+		const summary = [...byLabel].map(([k, n]) => `${k} x${n}`).join(", ");
+		console.error(`[j-pii] doubtful auto-masked: ${fresh.length} span(s) (${summary})`);
+		return { force: [...fresh], cleared: [], autoMasked: true };
+	}
+	const { force, cleared } = await reviewDoubtful(fresh, opts.decide);
+	return { force, cleared, autoMasked: false };
+}
+
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", () => {
 		void resetSession();
@@ -233,18 +252,22 @@ export default function (pi: ExtensionAPI) {
 			for (const span of autoClear) {
 				console.error(`[j-pii] send-in-clear (remembered choice): ${span.label} "${span.value}"`);
 			}
-			const { force, cleared } = await reviewDoubtful(fresh, async (span) => {
-				const choice = await ctx.ui.select(
-					`j-pii doubtful ${span.label}: "${span.value}" — mask it?`,
-					["Mask it", "Send in clear"],
-				);
-				if (choice === undefined) {
-						throw new Error(
-							"j-pii review dismissed, failing closed on: " +
-								fresh.map((x) => `${x.label} "${x.value}"`).join(", "),
-						);
-					}
-				return choice === "Mask it" ? "mask" : "clear";
+			const { autoMaskDoubtful } = resolveConfig();
+			const { force, cleared } = await resolveFreshDoubtful(fresh, {
+				autoMask: autoMaskDoubtful,
+				decide: async (span) => {
+					const choice = await ctx.ui.select(
+						`j-pii doubtful ${span.label}: "${span.value}" — mask it?`,
+						["Mask it", "Send in clear"],
+					);
+					if (choice === undefined) {
+							throw new Error(
+								"j-pii review dismissed, failing closed on: " +
+									fresh.map((x) => `${x.label} "${x.value}"`).join(", "),
+							);
+						}
+					return choice === "Mask it" ? "mask" : "clear";
+				},
 			});
 			for (const span of force) {
 				const ph = store.forceMask(span.value, span.label);

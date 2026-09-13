@@ -269,7 +269,7 @@ test("status WP7: warmup fields daemonOk/sidecarOk senza lentezza", async () => 
 test("hardening WP6: sw.js + manifest + version", async () => {
 	const sw = await fetch(base + "/sw.js");
 	assert.equal(sw.status, 200);
-	assert.ok((await sw.text()).includes("ocr-pi-v1"));
+	assert.ok((await sw.text()).includes("ocr-pi-v2"));
 	const mf = await j("/manifest.json");
 	assert.equal(mf.status, 200);
 	assert.equal(mf.body.short_name, "ocr-pi");

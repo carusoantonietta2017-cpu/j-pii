@@ -3,7 +3,7 @@
 // such as model ids untouched.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { maskStrings } from "./j-pii.ts";
+import { maskStrings, resolveFreshDoubtful } from "./j-pii.ts";
 
 process.env.JPII_ANALYZER = "fake";
 
@@ -25,6 +25,48 @@ test("deep walk resolves everything and preserves structure", async () => {
 	assert.equal(out.result.nothing, null);
 	assert.equal(JSON.stringify(out.result).includes("RSSMRA"), false);
 	assert.deepEqual(out.doubtful, []);
+});
+
+test("resolveFreshDoubtful auto-mask forces without prompting", async () => {
+	let calls = 0;
+	const fresh = [
+		{ value: "Rossi", label: "FULLNAME" },
+		{ value: "+39 333 1234567", label: "TELEPHONENUM" },
+	];
+	const out = await resolveFreshDoubtful(fresh, {
+		autoMask: true,
+		decide: async () => {
+			calls++;
+			return "mask";
+		},
+	});
+	assert.deepEqual(out.force, fresh);
+	assert.deepEqual(out.cleared, []);
+	assert.equal(out.autoMasked, true);
+	assert.equal(calls, 0);
+});
+
+test("resolveFreshDoubtful interactive delegates to the human", async () => {
+	const fresh = [{ value: "Rossi", label: "FULLNAME" }];
+	const out = await resolveFreshDoubtful(fresh, { autoMask: false, decide: async () => "clear" });
+	assert.deepEqual(out.force, []);
+	assert.deepEqual(out.cleared, fresh);
+	assert.equal(out.autoMasked, false);
+});
+
+test("resolveFreshDoubtful auto-mask with nothing fresh never prompts", async () => {
+	let calls = 0;
+	const out = await resolveFreshDoubtful([], {
+		autoMask: true,
+		decide: async () => {
+			calls++;
+			return "mask";
+		},
+	});
+	assert.deepEqual(out.force, []);
+	assert.deepEqual(out.cleared, []);
+	assert.equal(out.autoMasked, false);
+	assert.equal(calls, 0);
 });
 
 test("walk scopes to message content, infrastructure strings untouched", async () => {

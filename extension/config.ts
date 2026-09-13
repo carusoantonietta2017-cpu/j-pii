@@ -4,7 +4,10 @@
 // JPII_PYTHON selects the interpreter running the sidecar,
 // JPII_SIDECAR_PORT selects the sidecar port (default 5005),
 // JPII_MODEL_DIR overrides the model directory for the sidecar,
-// JPII_EXCLUDE_TAGS is the comma-separated per-project allowlist.
+// JPII_EXCLUDE_TAGS is the comma-separated per-project allowlist,
+// JPII_AUTO_MASK_DOUBTFUL=1 force-masks doubtful spans instead of asking
+// (headless dock: no TUI to answer the review prompt, so asking would
+// always fail closed; masking is the fail-safe direction).
 export interface JpiiConfig {
 	analyzer: "real" | "fake";
 	python: string;
@@ -12,6 +15,8 @@ export interface JpiiConfig {
 	sidecarUrl: string;
 	modelDir?: string;
 	excludeLabels: string[];
+	/** Force-mask doubtful spans without prompting (dock auto-mask). */
+	autoMaskDoubtful: boolean;
 }
 
 export function resolveConfig(env: Record<string, string | undefined> = process.env): JpiiConfig {
@@ -26,5 +31,6 @@ export function resolveConfig(env: Record<string, string | undefined> = process.
 			.split(",")
 			.map((t) => t.trim())
 			.filter((t) => t.length > 0),
+		autoMaskDoubtful: env.JPII_AUTO_MASK_DOUBTFUL === "1",
 	};
 }

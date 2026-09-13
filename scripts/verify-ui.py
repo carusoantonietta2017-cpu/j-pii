@@ -372,7 +372,7 @@ def main():
 
             def s_hardening():
                 sw = api(base, "/sw.js", method="GET")
-                assert b"ocr-pi-v1" in sw
+                assert b"ocr-pi-v2" in sw
                 mf = api(base, "/manifest.json")
                 assert mf["short_name"] == "ocr-pi"
                 ver = api(base, "/api/version")
