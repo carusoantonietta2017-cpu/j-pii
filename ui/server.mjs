@@ -277,6 +277,16 @@ export function createApp() {
 			return send(res, 200, { wikiRoot: config.wikiRoot, wikiRootExists, wikisCount, needsSetup: !wikiRootExists || wikisCount === 0 });
 			}
 
+			// GET /api/version (WP6 hardening: release tracciabile)
+			if (req.method === "GET" && url.pathname === "/api/version") {
+				let sha = "";
+				try {
+					const { stdout } = await execFileAsync("git", ["rev-parse", "--short", "HEAD"], { cwd: process.cwd(), timeout: 5000 });
+					sha = String(stdout).trim();
+				} catch {}
+				return send(res, 200, { name: "ocr-pi-ui", version: "0.1.0", sha, date: new Date().toISOString() });
+			}
+
 			// GET /api/llm-log (WP4: storico masked, mai valori veri)
 			if (req.method === "GET" && url.pathname === "/api/llm-log") {
 				return send(res, 200, llmLog);

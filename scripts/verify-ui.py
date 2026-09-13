@@ -361,6 +361,15 @@ def main():
                 pg.wait_for_timeout(300)
             step("settings dialog", s_settings_wizard)
 
+            def s_hardening():
+                sw = api(base, "/sw.js", method="GET")
+                assert b"ocr-pi-v1" in sw
+                mf = api(base, "/manifest.json")
+                assert mf["short_name"] == "ocr-pi"
+                ver = api(base, "/api/version")
+                assert ver["name"] == "ocr-pi-ui"
+            step("hardening: sw + manifest + version", s_hardening)
+
             def s_dock():
                 assert pg.locator("#dockmodel").inner_text().strip() not in ("", "…") or True
                 pg.locator("#docknew").click()

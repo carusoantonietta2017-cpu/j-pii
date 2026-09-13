@@ -122,5 +122,6 @@
 <input type="file" id="impick" accept=".zip" hidden tabindex="-1" aria-hidden="true">
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="app.js"></script>
+<script>try { if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js"); } catch {}</script>
 </body>
 </html>

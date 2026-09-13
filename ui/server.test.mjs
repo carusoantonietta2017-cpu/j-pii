@@ -254,6 +254,18 @@ test("chat con modello inesistente risponde errore, mai muta", async () => {
 	}
 });
 
+test("hardening WP6: sw.js + manifest + version", async () => {
+	const sw = await fetch(base + "/sw.js");
+	assert.equal(sw.status, 200);
+	assert.ok((await sw.text()).includes("ocr-pi-v1"));
+	const mf = await j("/manifest.json");
+	assert.equal(mf.status, 200);
+	assert.equal(mf.body.short_name, "ocr-pi");
+	const ver = await j("/api/version");
+	assert.equal(ver.status, 200);
+	assert.equal(ver.body.name, "ocr-pi-ui");
+});
+
 test("llm-log trasparenza: array vuoto poi hint senza valori veri", async () => {
 	const r = await j("/api/llm-log");
 	assert.equal(r.status, 200);
