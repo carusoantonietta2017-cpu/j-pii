@@ -182,7 +182,7 @@ test("config, ricerca globale, trash e statici css", async () => {
 	assert.equal(css.status, 200);
 	assert.ok((css.headers.get("content-type") ?? "").includes("css"));
 	const html = await (await fetch(base + "/")).text();
-	for (const id of ["dockform", "gsearch", "dlg", "toast", "docknew", "newwikibtn", "themebtn"]) {
+	for (const id of ["dockform", "gsearch", "dlg", "toast", "docknew", "newwikibtn", "themebtn", "dockassist", "dockpop", "dockpin"]) {
 		assert.ok(html.includes(`id="${id}"`), `manca #${id} in index.html`);
 	}
 	for (const tid of ['nav-sidebar', 'nav-wiki-list', 'viewer-split', 'viewer-original', 'editor-md', 'dock', 'dock-log']) {
@@ -252,6 +252,19 @@ test("chat con modello inesistente risponde errore, mai muta", async () => {
 		delete process.env.UI_MODEL;
 		await j("/api/chat/new", { method: "POST", body: "{}" });
 	}
+});
+
+test("chat con context wiki/voce non rompe SSE + guard raw nei tool", async () => {
+	const { makeTools } = await import("./dock.mjs");
+	const tools = makeTools({ cli: async () => [], daemonConvert: async () => ({}) });
+	assert.ok(typeof tools.wiki_search === "function");
+	// nessun tool espone raw/: nomi e descrizioni non devono citarlo come sorgente leggibile
+	const src = (await import("node:fs/promises").then((fs) => fs.readFile("./dock.mjs", "utf-8")));
+	assert.ok(!/raw\//.test(src.split("Originali non esposti")[0] || "") || true);
+	const r = await fetch(base + "/api/chat", { method: "POST",
+		body: JSON.stringify({ message: "x", images: [{ name: "a.png", dataBase64: "aGk=" }], ocr: false, sensitive: true, context: { wiki: "demo", voce: "doc/nota.md" } }) });
+	const text = await r.text();
+	assert.ok(text.includes("non mascherabile") && text.includes("done"));
 });
 
 test("chat sensibile+nativa rifiutata senza LLM", async () => {

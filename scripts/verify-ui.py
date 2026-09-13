@@ -304,6 +304,28 @@ def main():
                 pg.screenshot(path=f"{SHOTS}/09b-pairing.png")
             step("pairing persiste dopo save (bug originale)", s_pairing_persist)
 
+            def s_dockmode():
+                assert pg.locator("#dockassist").count() == 1
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+                pg.locator("#dockpop").evaluate("b=>b.click()")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "floating"
+                assert pg.evaluate("localStorage.getItem('ocr-pi-dockmode')") == "floating"
+                pg.screenshot(path=f"{SHOTS}/10a-dock-floating.png")
+                pg.locator("#dockpin").evaluate("b=>b.click()")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+                pg.locator("#dockassist").evaluate("b=>b.click()")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "floating"
+                pg.keyboard.press("Escape")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+                pg.reload(wait_until="networkidle")
+                pg.wait_for_timeout(600)
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+            step("dock dual-mode embedded<->popup", s_dockmode)
+
             def s_dock():
                 assert pg.locator("#dockmodel").inner_text().strip() not in ("", "…") or True
                 pg.locator("#docknew").click()

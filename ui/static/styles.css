@@ -315,6 +315,14 @@ mark.pii[data-label="FULLNAME"] { background: #ddd6fe; border-color: #7c3aed; }
 mark.pii.doubtful { background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 6px, #fde68a 6px, #fde68a 12px); border-style: dashed; }
 html[data-theme="dark"] mark.pii { color: #111; }
 #edithost textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+/* dock dual-mode WP3: embedded in pagina + popup flottante */
+#dock[data-mode="floating"] { position: fixed; right: 16px; bottom: 16px; width: min(420px, calc(100vw - 32px)); max-height: min(70vh, 640px); display: flex; flex-direction: column; z-index: 40; border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-lg); }
+#dock[data-mode="floating"] #docklog { max-height: 40vh; }
+#dock[data-mode="floating"] #dockhead { cursor: grab; user-select: none; }
+#dock[data-mode="floating"] #dockhead:active { cursor: grabbing; }
+@media (max-width: 800px) {
+  #dock[data-mode="floating"] { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 75vh; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   aside#side { transition: none; }

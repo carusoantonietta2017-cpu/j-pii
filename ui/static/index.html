@@ -32,6 +32,7 @@
   </form>
   <div class="top-actions">
     <span class="modelbadge" id="modelbadge" title="Modello del dock agente">…</span>
+    <button id="dockassist" class="iconbtn" type="button" aria-label="Apri assistente pi" title="Assistente pi">🤖</button>
     <button id="themebtn" class="iconbtn" aria-label="Cambia tema chiaro o scuro" title="Tema">◐</button>
     <button id="newwikibtn" class="btn hide-sm" type="button">Nuova wiki</button>
     <label class="filebtn">Converti file…<input type="file" id="upick" accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.tif,.gif,.bmp" aria-label="Scegli file da convertire"></label>
@@ -75,11 +76,14 @@
     </div>
   </main>
 </div>
-<section id="dock" aria-label="Agente pi" data-testid="dock">
+<section id="dock" aria-label="Agente pi" data-testid="dock" data-mode="embedded">
   <div id="dockhead">
+    <span aria-hidden="true">🤖</span>
     <h2>Agente pi</h2>
     <span class="pill" id="dockmodel" translate="no" data-testid="dock-model">…</span>
     <button id="docknew" class="mini" type="button" title="Azzera la conversazione">Nuova conversazione</button>
+    <button id="dockpop" class="mini" type="button" title="Stacca come popup" aria-label="Stacca come popup">⧉</button>
+    <button id="dockpin" class="mini" type="button" title="Riaggancia in pagina" aria-label="Riaggancia in pagina" hidden>🗔</button>
     <button id="docktoggle" type="button" aria-expanded="false">Espandi agente</button>
   </div>
   <div id="docklog" aria-live="polite" data-testid="dock-log"></div>

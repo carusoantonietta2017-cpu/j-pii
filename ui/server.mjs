@@ -572,7 +572,15 @@ export function createApp() {
 						say({ type: "done" });
 						return res.end();
 					}
+					const ctx = body.context && typeof body.context === "object" ? body.context : {};
+					const ctxWiki = String(ctx.wiki || "").slice(0, 64);
+					const ctxVoce = String(ctx.voce || "").slice(0, 128);
 					let prompt = body.message ?? "";
+					if (ctxWiki || ctxVoce) {
+						prompt = `[Contesto wiki${ctxWiki ? ` "${ctxWiki}"` : ""}${ctxVoce ? ` voce "${ctxVoce}"` : ""}. Usa solo doc/*.md via wiki_search/list (mai raw/, mai path assoluti). I file originali restano locali: se serve un originale, usa la trascrizione md collegata. Rispondi con placeholder, mai valori sensibili in chiaro.]\n\n` + prompt;
+					} else {
+						prompt = `[Contesto wiki non selezionata. Usa wiki_search/list su doc/*.md, mai raw/.]\n\n` + prompt;
+					}
 					const sdkImages = [];
 					for (const img of images) {
 						if (body.ocr) {
@@ -586,6 +594,8 @@ export function createApp() {
 						}
 					}
 					const dockCli = async (args, extra = {}) => {
+						const flat = (args || []).join(" ");
+						if (/\braw\//.test(flat) || flat.includes("..")) throw new Error("Originali non esposti al modello: usa la trascrizione doc/*.md collegata");
 						if (extra.markdown) {
 							// wiki_add via agent: ["add", wiki, file?, --titolo?] -> file da markdown
 							const dir = mkdtempSync(join(tmpdir(), "ocr-pi-dockadd-"));

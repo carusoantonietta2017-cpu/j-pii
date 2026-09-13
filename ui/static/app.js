@@ -952,12 +952,14 @@ $("dockform").addEventListener("submit", async (e) => {
       images.push({ name: f.name, dataBase64: btoa(bin) });
     }
     const o = opts();
+    const ctx = state.sel ? { wiki: state.sel.wiki, voce: state.sel.file } : state.card ? { wiki: state.card } : {};
     const r = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: v, images,
         ocr: $("dockocr").checked, sensitive: $("docksens").checked,
         engine: $("dockengine").value || o.engine || "docling", deskew: $("dockdeskew").checked || !!o.deskew,
+        context: ctx,
       }),
     });
     $("dockimg").value = "";
@@ -994,6 +996,50 @@ document.querySelectorAll("#chips button").forEach((b) => {
   b.onclick = () => { $("dockin").value = b.dataset.q; $("dockform").requestSubmit(); };
 });
 
+/* ---------- dock dual-mode WP3 ---------- */
+function setDockMode(mode) {
+  const d = $("dock");
+  d.dataset.mode = mode;
+  try { localStorage.setItem("ocr-pi-dockmode", mode); } catch {}
+  const floating = mode === "floating";
+  $("dockpop").hidden = floating;
+  $("dockpin").hidden = !floating;
+  $("dockassist").setAttribute("aria-expanded", floating || d.classList.contains("open"));
+}
+function initDockMode() {
+  let mode = "embedded";
+  try { mode = localStorage.getItem("ocr-pi-dockmode") || "embedded"; } catch {}
+  if (mode !== "floating") mode = "embedded";
+  setDockMode(mode);
+  $("dockpop").onclick = () => { setDockMode("floating"); $("dock").classList.add("open"); $("dockin").focus(); };
+  $("dockpin").onclick = () => setDockMode("embedded");
+  $("dockassist").onclick = () => {
+    const d = $("dock");
+    if (d.dataset.mode === "floating") setDockMode("embedded");
+    else { setDockMode("floating"); d.classList.add("open"); $("dockin").focus(); }
+  };
+  // drag popup da dockhead (mouse + touch, no librerie)
+  const head = $("dockhead");
+  let sx = 0, sy = 0, ox = 0, oy = 0, drag = false;
+  head.addEventListener("pointerdown", (e) => {
+    if ($("dock").dataset.mode !== "floating") return;
+    if (e.target.closest("button,input,select,textarea")) return;
+    drag = true; sx = e.clientX; sy = e.clientY;
+    const r = $("dock").getBoundingClientRect();
+    ox = window.innerWidth - r.right; oy = window.innerHeight - r.bottom;
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    const d = $("dock");
+    d.style.right = Math.max(8, ox - dx) + "px";
+    d.style.bottom = Math.max(8, oy - dy) + "px";
+    d.style.left = "auto"; d.style.top = "auto";
+  });
+  head.addEventListener("pointerup", () => { drag = false; });
+}
+
 /* ---------- chrome ---------- */
 function initTheme() {
   const saved = localStorage.getItem("ocr-pi-theme");
@@ -1026,7 +1072,11 @@ $("docktoggle").onclick = (e) => {
   e.currentTarget.textContent = open ? "Riduci agente" : "Espandi agente";
 };
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") document.body.classList.remove("nav");
+  if (e.key === "Escape") {
+    document.body.classList.remove("nav");
+    if ($("dock") && $("dock").dataset.mode === "floating") setDockMode("embedded");
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("gq").focus(); }
 });
 window.addEventListener("hashchange", () => {
@@ -1043,6 +1093,7 @@ window.addEventListener("hashchange", () => {
 /* ---------- avvio ---------- */
 (function init() {
   initTheme();
+  try { initDockMode(); } catch {}
   try {
     const o = opts();
     if (o.engine) { const d = $("dockengine"); if (d) d.value = o.engine; }
