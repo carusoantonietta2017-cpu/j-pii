@@ -162,7 +162,76 @@ export function createApp() {
 
 			// GET /api/config (modello dock + radici, per badge UI)
 			if (req.method === "GET" && url.pathname === "/api/config") {
-				return send(res, 200, { model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free" });
+				return send(res, 200, { model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wikiRoot: config.wikiRoot });
+			}
+
+			// POST /api/mask/preview {text} -> segments rizzo-pii (o regex fallback fake)
+			// Usato dall'editor per evidenziare PII come fa rizzo-pii. Mai valori veri in log.
+			if (req.method === "POST" && url.pathname === "/api/mask/preview") {
+				const body = JSON.parse((await readBody(req, 2 * 1024 * 1024)) || "{}");
+				const text = String(body.text ?? "");
+				if (!text) return send(res, 200, { segments: [], engine: "none" });
+				const analyzer = process.env.JPII_ANALYZER ?? "real";
+				const sidecarUrl = process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005";
+				if (analyzer !== "fake") {
+					try {
+						const ctl = new AbortController();
+						const t = setTimeout(() => ctl.abort(), 15000);
+						const r = await fetch(`${sidecarUrl}/analyze`, {
+							method: "POST", headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ text, include_mapping: false }), signal: ctl.signal,
+						});
+						clearTimeout(t);
+						if (r.ok) {
+							const data = await r.json();
+							const segs = Array.isArray(data.segments) ? data.segments : [];
+							// segments -> detections con offset (cursor in ordine documento)
+							const out = [];
+							let cursor = 0;
+							for (const s of segs) {
+								if (typeof s.t !== "string" || !s.t || typeof s.label !== "string") continue;
+								const i = text.indexOf(s.t, cursor);
+								if (i === -1) continue;
+								out.push({ start: i, end: i + s.t.length, label: s.label, validated: s.validated });
+								cursor = i + s.t.length;
+								if (out.length >= 200) break;
+							}
+							return send(res, 200, { segments: out, engine: "rizzo-pii" });
+						}
+					} catch {
+						/* sidecar assente: fallback regex sotto */
+					}
+				}
+				// fallback fake: CF + EMAIL come j-pii fakeAnalyzer
+				const out = [];
+				const pats = [
+					{ re: /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/g, label: "CF" },
+					{ re: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, label: "EMAIL" },
+				];
+				for (const p of pats) {
+					let m;
+					while ((m = p.re.exec(text)) !== null && out.length < 200) {
+						out.push({ start: m.index, end: m.index + m[0].length, label: p.label, validated: true });
+					}
+				}
+				out.sort((a, b) => a.start - b.start);
+				return send(res, 200, { segments: out, engine: "fake" });
+			}
+
+			// GET /api/status (workdir sempre: guida l'utente se non configurata)
+			if (req.method === "GET" && url.pathname === "/api/status") {				let wikiRootExists = false;
+			let wikisCount = 0;
+			try {
+				const st = await stat(join(config.wikiRoot, "wiki"));
+				wikiRootExists = st.isDirectory();
+				if (wikiRootExists) {
+					const out = await cli(["list"]);
+				wikisCount = Array.isArray(out) ? out.length : 0;
+				}
+			} catch {
+				wikiRootExists = false;
+			}
+			return send(res, 200, { wikiRoot: config.wikiRoot, wikiRootExists, wikisCount, needsSetup: !wikiRootExists || wikisCount === 0 });
 			}
 
 			// GET /api/search?q=&stato=&wiki=  (ricerca globale sopra cli search)
@@ -196,21 +265,36 @@ export function createApp() {
 			}
 
 			// GET /api/wiki/:slug/file?path=doc/x.md  (confinato alla wiki)
-			if (req.method === "GET" && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "file") {
+			if ((req.method === "GET" || req.method === "PUT") && seg[0] === "api" && seg[1] === "wiki" && seg[3] === "file") {
 				const dir = join(config.wikiRoot, "wiki", decodeURIComponent(seg[2]));
 				const rel = (url.searchParams.get("path") ?? "").replace(/\\/g, "/");
 				const file = normalize(join(dir, rel));
 				if (rel.includes("..") || (file !== dir && !file.startsWith(dir + sep))) {
 					return send(res, 403, { error: "fuori dalla wiki" });
 				}
-				try {
-					if (!(await stat(file)).isFile()) return send(res, 404, { error: "non trovato" });
-					const ext = extname(file);
-					res.writeHead(200, { "Content-Type": MIME[ext] ?? "application/octet-stream" });
-					return res.end(await readFile(file));
-				} catch {
-					return send(res, 404, { error: "non trovato" });
+				if (req.method === "GET") {
+					try {
+						if (!(await stat(file)).isFile()) return send(res, 404, { error: "non trovato" });
+						const ext = extname(file);
+						res.writeHead(200, { "Content-Type": MIME[ext] ?? "application/octet-stream" });
+						return res.end(await readFile(file));
+					} catch {
+						return send(res, 404, { error: "non trovato" });
+					}
 				}
+				// PUT: salva editor (solo doc/*.md, preserva pairing raw via manager.update-file)
+				if (!rel.startsWith("doc/") || !rel.endsWith(".md")) {
+					return send(res, 400, { error: "solo doc/*.md editabili" });
+				}
+				const body = JSON.parse((await readBody(req, 4 * 1024 * 1024)) || "{}");
+				if (typeof body.markdown !== "string" || !body.markdown.trim()) {
+					return send(res, 400, { error: "markdown vuoto" });
+				}
+				const slug = decodeURIComponent(seg[2]);
+				const tmp = mkdtempSync(join(tmpdir(), "ocr-pi-put-"));
+				const tmpFile = join(tmp, "voce.md");
+				writeFileSync(tmpFile, body.markdown);
+				return send(res, 200, await cli(["update-file", slug, rel, tmpFile]));
 			}
 
 			// GET /api/wiki/:slug/trash  (voci cestinate, recuperabili a mano da trash/)
@@ -395,6 +479,24 @@ export function createApp() {
 				const op = seg[3];
 				if (op === "add") {
 					let file = body.file ?? "";
+				let rawTmp = "";
+				// raw da upload (bytes) oppure da path server consentito (sorgenti/wiki)
+				if (body.rawName && body.rawDataBase64) {
+					const rdir = mkdtempSync(join(tmpdir(), "ocr-pi-raw-"));
+				rawTmp = join(rdir, String(body.rawName).split("/").pop().replace(/[^\w.\-]+/g, "_"));
+					writeFileSync(rawTmp, Buffer.from(body.rawDataBase64, "base64"));
+				} else if (body.rawPath) {
+					const rp = normalize(String(body.rawPath).replace(/\\/g, "/"));
+					const roots = [resolve(config.wikiRoot), ...(await readSources()).map((s) => normalize(resolve(String(s))))];
+					const inside = roots.some((r) => rp === r || rp.startsWith(r + sep));
+					if (!inside) return send(res, 403, { error: "raw fuori dalle cartelle consentite" });
+					try {
+						if (!(await stat(rp)).isFile()) return send(res, 404, { error: "raw assente" });
+					} catch {
+						return send(res, 404, { error: "raw assente" });
+					}
+					rawTmp = rp;
+				}
 					if (!file && body.markdown) {
 						const dir = mkdtempSync(join(tmpdir(), "ocr-pi-add-"));
 						for (const a of body.assets ?? []) {
@@ -408,7 +510,11 @@ export function createApp() {
 					if (!file) return send(res, 400, { error: "servono file o markdown" });
 					const args = ["add", slug, file];
 					if (body.title) args.push("--titolo", body.title);
+					if (rawTmp) args.push("--raw", rawTmp);
 					return send(res, 200, await cli(args));
+				}
+				if (op === "link-raw") {
+					return send(res, 200, await cli(["link-raw", slug]));
 				}
 				if (op === "review") {
 					if (!body.voce || !body.stato) return send(res, 400, { error: "servono voce e stato" });

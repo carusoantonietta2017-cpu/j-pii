@@ -230,7 +230,9 @@ def main():
                 pg.wait_for_selector("#mdhost", timeout=5000)
                 assert pg.locator("#orig img.doc").evaluate("img => img.naturalWidth") > 0
                 assert "iva" in pg.locator("#conv").inner_text().lower()
-                assert pg.locator("#conv .segmented").count() == 1
+                assert pg.locator("#conv .segmented").count() >= 1
+                assert pg.locator("#tabPrev").count() == 1 and pg.locator("#tabEdit").count() == 1
+                assert pg.locator("#mdedit").count() == 1
                 pg.screenshot(path=f"{SHOTS}/08d-raw-matched.png")
             step("raw collegato: immagine + voce", s_raw_matched)
 

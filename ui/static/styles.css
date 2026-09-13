@@ -307,6 +307,14 @@ dialog .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; paddin
   #dock.open #dockfiles { display: block; }
   .top-actions .btn span.lbl { display: none; }
 }
+/* PII highlight stile rizzo-pii (WP2): mark per-label, click per dettagli */
+mark.pii { background: #fef08a; border: 1px solid #eab308; border-radius: 4px; padding: 0 3px; cursor: pointer; }
+mark.pii[data-label="CF"], mark.pii[data-label="PIVA"], mark.pii[data-label="IBAN"] { background: #fecaca; border-color: #dc2626; }
+mark.pii[data-label="EMAIL"], mark.pii[data-label="TELEPHONENUM"] { background: #bfdbfe; border-color: #2563eb; }
+mark.pii[data-label="FULLNAME"] { background: #ddd6fe; border-color: #7c3aed; }
+mark.pii.doubtful { background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 6px, #fde68a 6px, #fde68a 12px); border-style: dashed; }
+html[data-theme="dark"] mark.pii { color: #111; }
+#edithost textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   aside#side { transition: none; }

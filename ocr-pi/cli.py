@@ -48,7 +48,7 @@ def cmd_show(a):
 
 
 def cmd_add(a):
-    out(manager.add(a.root, a.wiki, a.file, title=a.titolo), a.json)
+    out(manager.add(a.root, a.wiki, a.file, title=a.titolo, raw_source=getattr(a, "raw", None)), a.json)
 
 
 def cmd_review(a):
@@ -65,6 +65,15 @@ def cmd_rename(a):
 
 def cmd_trash(a):
     out(manager.trash_list(a.root, a.wiki), a.json)
+
+
+def cmd_linkraw(a):
+    out(manager.link_raws(a.root, a.wiki), a.json)
+
+
+def cmd_updatefile(a):
+    text = Path(a.file).read_text(encoding="utf-8")
+    out(manager.update_file(a.root, a.wiki, a.rel, text), a.json)
 
 
 def cmd_export(a):
@@ -88,13 +97,17 @@ def main(argv=None) -> int:
     p.set_defaults(f=cmd_search)
     p = sub.add_parser("show"); p.add_argument("wiki"); p.add_argument("voce"); p.set_defaults(f=cmd_show)
     p = sub.add_parser("add"); p.add_argument("wiki"); p.add_argument("file")
-    p.add_argument("--titolo", default=None); p.set_defaults(f=cmd_add)
+    p.add_argument("--titolo", default=None); p.add_argument("--raw", default=None)
+    p.set_defaults(f=cmd_add)
     p = sub.add_parser("review"); p.add_argument("wiki"); p.add_argument("voce"); p.add_argument("stato")
     p.set_defaults(f=cmd_review)
     p = sub.add_parser("remove"); p.add_argument("wiki"); p.add_argument("voce", nargs="?")
     p.add_argument("--confirm", action="store_true"); p.set_defaults(f=cmd_remove)
     p = sub.add_parser("rename"); p.add_argument("wiki"); p.add_argument("nuovo"); p.set_defaults(f=cmd_rename)
     p = sub.add_parser("trash"); p.add_argument("wiki"); p.set_defaults(f=cmd_trash)
+    p = sub.add_parser("link-raw"); p.add_argument("wiki"); p.set_defaults(f=cmd_linkraw)
+    p = sub.add_parser("update-file"); p.add_argument("wiki"); p.add_argument("rel"); p.add_argument("file")
+    p.set_defaults(f=cmd_updatefile)
     p = sub.add_parser("export"); p.add_argument("wiki")
     p.add_argument("--senza-raw", action="store_true"); p.set_defaults(f=cmd_export)
     p = sub.add_parser("import"); p.add_argument("file"); p.add_argument("--merge", action="store_true")

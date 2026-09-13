@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from wiki import slugify, write_wiki, export_wiki, ConvertedDoc
+from wiki import slugify, write_wiki, export_wiki, ConvertedDoc, strip_frontmatter, parse_frontmatter, with_frontmatter, stem_of, resolve_pair
 
 VALID_STATES = ("draft", "reviewed", "versioned")
 
@@ -58,7 +58,7 @@ def list_wikis(root=".") -> list:
 
 
 def search(root, query: str, stato=None, wiki=None) -> list:
-    """Grep sui doc/*.md. Ritorna [{wiki, file, linea, testo}]."""
+    """Grep sui doc/*.md (frontmatter escluso). Ritorna [{wiki, file, linea, testo}]."""
     q = query.lower()
     targets = [slugify(wiki)] if wiki else [w["slug"] for w in list_wikis(root)]
     hits = []
@@ -71,7 +71,8 @@ def search(root, query: str, stato=None, wiki=None) -> list:
             rel = f"doc/{md.name}"
             if stato and states.get(rel) != stato:
                 continue
-            for i, line in enumerate(md.read_text(encoding="utf-8").splitlines(), 1):
+            body = strip_frontmatter(md.read_text(encoding="utf-8")).lstrip("\n")
+            for i, line in enumerate(body.splitlines(), 1):
                 if q in line.lower():
                     hits.append({"wiki": slug, "file": rel, "linea": i, "testo": line.strip()})
     return hits
@@ -95,8 +96,9 @@ def create_wiki(root, slug: str):
     return write_wiki([], slug, root=root)
 
 
-def add(root, wiki: str, source_md, title=None) -> dict:
-    """Aggiunge un md come voce draft; crea la wiki se assente."""
+def add(root, wiki: str, source_md, title=None, raw_source=None) -> dict:
+    """Aggiunge un md come voce draft; crea la wiki se assente.
+    raw_source: path originale da copiare in raw/ e linkare in meta+frontmatter."""
     src = Path(source_md)
     if not src.exists():
         raise FileNotFoundError(f"sorgente assente: {src}")
@@ -112,6 +114,7 @@ def add(root, wiki: str, source_md, title=None) -> dict:
     text = src.read_text(encoding="utf-8")
     # trascina gli asset referenziati se sono accanto al sorgente
     assets_dir = d / "doc" / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
     def sub(m):
         base = Path(m.group(1)).name
         cand = src.parent / base
@@ -122,11 +125,128 @@ def add(root, wiki: str, source_md, title=None) -> dict:
             return m.group(0).replace(m.group(1), f"assets/{base}", 1)
         return m.group(0)
     text = re.sub(r"!\[[^\]]*\]\(([^)]+)\)", sub, text)
+    raw_rel = ""
+    if raw_source:
+        rs = Path(raw_source)
+        if not rs.exists() or not rs.is_file():
+            raise FileNotFoundError(f"raw assente: {rs}")
+        raw_dir = d / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        dest = raw_dir / rs.name
+        # mai sovrascrivere un raw diverso: se esiste con stesso nome ma diverso contenuto, versiona
+        if dest.exists():
+            try:
+                if dest.read_bytes() != rs.read_bytes():
+                    stem, suf = rs.stem, rs.suffix
+                    n = 1
+                    while (raw_dir / f"{stem}-{n}{suf}").exists():
+                        n += 1
+                    dest = raw_dir / f"{stem}-{n}{suf}"
+            except Exception:
+                pass
+        else:
+            shutil.copy2(rs, dest)
+            if not dest.exists():
+                shutil.copy2(rs, dest)
+        # assicura copia
+        if not dest.exists():
+            shutil.copy2(rs, dest)
+        raw_rel = f"raw/{dest.name}"
+        fm = parse_frontmatter(text)
+        fm.setdefault("wiki", slugify(wiki))
+        fm.setdefault("voce", name)
+        fm["source"] = f"../{raw_rel}"
+        text = with_frontmatter(text, fm)
+    else:
+        # garantisci almeno frontmatter minimo per il pairing futuro
+        if not parse_frontmatter(text):
+            text = with_frontmatter(text, {"wiki": slugify(wiki), "voce": name})
     (d / vfile).write_text(text, encoding="utf-8")
-    entry = {"name": name, "file": vfile, "pages": 0, "engine": "", "seconds": 0.0, "review": "draft"}
+    entry = {"name": name, "file": vfile, "pages": 0, "engine": "", "seconds": 0.0, "review": "draft", "raw": raw_rel}
     meta["docs"].append(entry)
     _save_meta(d, meta)
     return entry
+
+
+def update_file(root, wiki: str, rel_path: str, markdown: str) -> dict:
+    """Aggiorna una voce esistente dall'editor (PUT). Preserva frontmatter source/raw.
+    Rimette review=draft se era reviewed/versioned (mai promuovere in silenzio)."""
+    d = _require_wiki(root, wiki)
+    rel = str(rel_path).replace("\\", "/")
+    if ".." in rel or rel.startswith("/"):
+        raise ValueError("path non valido")
+    meta = _load_meta(d)
+    target = None
+    for x in meta["docs"]:
+        if x["file"] == rel:
+            target = x
+            break
+    if target is None:
+        # consenti SKILL.md/index.md? no: solo doc/*.md editabili
+        if not (rel.startswith("doc/") and rel.endswith(".md")):
+            raise ValueError("solo doc/*.md editabili")
+        raise LookupError(f"voce assente: {rel}")
+    dest = d / rel
+    old = dest.read_text(encoding="utf-8") if dest.exists() else ""
+    old_fm = parse_frontmatter(old)
+    new_fm = parse_frontmatter(markdown)
+    merged = {**new_fm, **{k: v for k, v in old_fm.items() if k in ("source", "wiki", "voce") and k not in new_fm}}
+    if not merged.get("wiki"):
+        merged["wiki"] = slugify(wiki)
+    if not merged.get("voce"):
+        merged["voce"] = target.get("name", "")
+    # mantieni raw link anche se l'editor lo toglie
+    if target.get("raw") and not merged.get("source"):
+        merged["source"] = f"../{target['raw']}"
+    final = with_frontmatter(markdown, merged)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(final, encoding="utf-8")
+    if target.get("review") in ("reviewed", "versioned"):
+        target["review"] = "draft"
+    _save_meta(d, meta)
+    return target
+
+
+def link_raws(root, wiki: str) -> dict:
+    """Migrazione: collega raw orfani a voci senza meta.raw via stem match.
+    Aggiorna meta.json + frontmatter source. Ritorna {linked, skipped}."""
+    d = _require_wiki(root, wiki)
+    meta = _load_meta(d)
+    try:
+        raws = [p.name for p in (d / "raw").iterdir() if p.is_file()]
+    except FileNotFoundError:
+        return {"linked": 0, "skipped": len(meta.get("docs", []))}
+    linked = 0
+    for x in meta["docs"]:
+        if x.get("raw"):
+            continue
+        pair = resolve_pair([x], raws, x.get("file", ""))
+        cand = (pair.get("raw") or "").split("/")[-1]
+        if cand and (d / "raw" / cand).exists():
+            x["raw"] = f"raw/{cand}"
+            # aggiorna frontmatter
+            p = d / x["file"]
+            if p.exists():
+                txt = p.read_text(encoding="utf-8")
+                fm = parse_frontmatter(txt)
+                fm["source"] = f"../raw/{cand}"
+                if not fm.get("wiki"):
+                    fm["wiki"] = meta.get("slug", slugify(wiki))
+                if not fm.get("voce"):
+                    fm["voce"] = x.get("name", "")
+                p.write_text(with_frontmatter(txt, fm), encoding="utf-8")
+            linked += 1
+    # voci senza frontmatter: aggiungilo comunque
+    for x in meta["docs"]:
+        p = d / x["file"]
+        if p.exists() and not parse_frontmatter(p.read_text(encoding="utf-8")):
+            txt = p.read_text(encoding="utf-8")
+            fm = {"wiki": meta.get("slug", slugify(wiki)), "voce": x.get("name", "")}
+            if x.get("raw"):
+                fm["source"] = f"../{x['raw']}"
+            p.write_text(with_frontmatter(txt, fm), encoding="utf-8")
+    _save_meta(d, meta)
+    return {"linked": linked, "skipped": len(meta["docs"]) - linked}
 
 
 def review(root, wiki: str, voce: str, stato: str) -> dict:

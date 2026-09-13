@@ -38,13 +38,13 @@
   </div>
 </header>
 <div id="work">
-  <aside id="side" aria-label="Dizionari e sorgenti">
+  <aside id="side" aria-label="Dizionari e sorgenti" data-testid="nav-sidebar">
     <div class="side-search">
       <label class="hint" for="q">Filtra la sidebar</label>
       <input id="q" type="search" name="filtra" autocomplete="off" placeholder="Filtra voci, es. fattura…" aria-label="Filtra voci nella sidebar">
     </div>
     <h2>Sorgenti file</h2>
-    <ul id="folder" class="side-list"></ul>
+    <ul id="folder" class="side-list" data-testid="nav-sources"></ul>
     <div class="sechead"><h2>Wiki</h2><button class="iconbtn" id="wikimenubtn" aria-label="Menu wiki" aria-expanded="false" aria-haspopup="menu">⋯</button></div>
     <div id="mtoast" role="status" aria-live="polite"></div>
     <div id="wikimenu" role="menu" aria-label="Azioni wiki">
@@ -57,12 +57,12 @@
       <button data-m="trashview" role="menuitem">Vedi cestino<small>Voci cestinate</small></button>
       <button data-m="removewiki" role="menuitem" class="danger">Elimina wiki…<small>Serve conferma</small></button>
     </div>
-    <ul id="wikis" class="side-list"></ul>
+    <ul id="wikis" class="side-list" data-testid="nav-wiki-list"></ul>
     <h2>Altro</h2>
     <ul class="side-list"><li class="sub" id="trashli"><button id="trashbtn" type="button">Cestino (<span id="trashn">0</span>)</button></li></ul>
   </aside>
-  <main id="split" data-tab="pdf">
-    <div class="crumbs" id="crumbs" aria-label="Posizione">
+  <main id="split" data-tab="pdf" data-testid="viewer-split">
+    <div class="crumbs" id="crumbs" aria-label="Posizione" data-testid="nav-crumbs">
       <nav aria-label="Breadcrumb"><span class="hint">Scegli una voce dalla sidebar, oppure converti un file.</span></nav>
     </div>
     <div class="tabs" role="tablist" aria-label="Viste documento">
@@ -70,19 +70,19 @@
       <button id="tMd" aria-pressed="false" role="tab">Convertito</button>
     </div>
     <div id="splitpanes">
-      <section class="pane left" aria-label="Originale"><div id="orig"></div></section>
-      <section class="pane right" aria-label="Convertito"><div id="conv"></div></section>
+      <section class="pane left" aria-label="Originale" data-testid="viewer-original"><div id="orig"></div></section>
+      <section class="pane right" aria-label="Convertito" data-testid="editor-md"><div id="conv"></div></section>
     </div>
   </main>
 </div>
-<section id="dock" aria-label="Agente pi">
+<section id="dock" aria-label="Agente pi" data-testid="dock">
   <div id="dockhead">
     <h2>Agente pi</h2>
-    <span class="pill" id="dockmodel" translate="no">…</span>
+    <span class="pill" id="dockmodel" translate="no" data-testid="dock-model">…</span>
     <button id="docknew" class="mini" type="button" title="Azzera la conversazione">Nuova conversazione</button>
     <button id="docktoggle" type="button" aria-expanded="false">Espandi agente</button>
   </div>
-  <div id="docklog" aria-live="polite"></div>
+  <div id="docklog" aria-live="polite" data-testid="dock-log"></div>
   <div id="chips">
     <button data-q="Elenca le wiki" type="button">Elenca le wiki</button>
     <button data-q="Cerca iva tra le voci" type="button">Cerca iva</button>

@@ -2,6 +2,43 @@
 const $ = (id) => document.getElementById(id);
 const state = { wikis: [], details: {}, sources: [], sel: null, card: null, config: { model: "…" }, search: null };
 const SENSITIVE = /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+const stripFrontmatter = (md) => String(md || '').replace(/^---\n[\s\S]*?\n---\n/, '');
+const parseFrontmatter = (md) => {
+  const m = String(md || '').match(/^---\n([\s\S]*?)\n---\n/);
+  if (!m) return {};
+  const out = {};
+  for (const line of m[1].split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+};
+// Pair originale<->md: preferisce meta.raw, fallback stem match (stessa regola server)
+const slugStem = (n) => String(n).toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+const resolvePair = (docs, rawNames, identifier) => {
+  const ident = String(identifier);
+  for (const d of docs || []) {
+    if (ident === d.file || ident === d.name) {
+      let raw = d.raw || '';
+      if (!raw) {
+        const st = slugStem((d.file || '').split('/').pop());
+        const hit = (rawNames || []).find((r) => slugStem(r) === st || slugStem(d.name || '') === slugStem(r));
+        if (hit) raw = 'raw/' + hit;
+      }
+      return { doc: d.file, raw, name: d.name };
+    }
+  }
+  const rbase = ident.split('/').pop();
+  for (const d of docs || []) {
+    if ((d.raw || '').split('/').pop() === rbase) return { doc: d.file, raw: d.raw, name: d.name };
+  }
+  for (const d of docs || []) {
+    if (slugStem((d.file || '').split('/').pop()) === slugStem(rbase) || slugStem(d.name || '') === slugStem(rbase)) {
+      return { doc: d.file, raw: d.raw || ('raw/' + rbase), name: d.name };
+    }
+  }
+  return { doc: '', raw: rbase ? 'raw/' + rbase : '', name: '' };
+};
 
 async function api(path, opts = {}) {
   const r = await fetch(path, opts);
@@ -247,7 +284,11 @@ async function select(wiki, file, { silent } = {}) {
       fetch(base + "/file?path=" + encodeURIComponent(file)).then((r) => { if (!r.ok) throw new Error("Voce illeggibile: scegli un’altra voce"); return r.text(); }),
     ]);
     const doc = (meta.docs || []).find((x) => x.file === file) || { name: file, review: "?" };
-    const sensitive = SENSITIVE.test(text);
+    const body = stripFrontmatter(text);
+    const fm = parseFrontmatter(text);
+    const pair = resolvePair(meta.docs || [], meta.raw || [], file);
+    const pairedRaw = (doc.raw || pair.raw || fm.source?.replace(/^\.\.\//, '') || '').replace(/^raw\//, '');
+    const sensitive = SENSITIVE.test(body);
     renderCrumbs({ wiki, file }, { ...doc, sensitive });
     $("conv").innerHTML = `<h2>${esc(doc.name)}</h2>
       <div class="toolbar">
@@ -263,7 +304,19 @@ async function select(wiki, file, { silent } = {}) {
         </div>
         <div class="hint">Le opzioni valgono per le prossime conversioni (upload, sorgenti, originali wiki). I modelli restano in locale, mai in rete.</div>
       </div>
-      <div id="mdhost">${renderMd(text, base + "/file?path=" + encodeURIComponent(file))}</div>
+      <div class="toolbar" role="tablist" aria-label="Modo editor">
+        <div class="segmented" role="group" aria-label="Anteprima o modifica">
+          <button id="tabPrev" aria-pressed="true">Anteprima</button>
+          <button id="tabEdit" aria-pressed="false">Modifica</button>
+        </div>
+        <span class="hint" id="piiHint">Evidenzio PII come rizzo-pii…</span>
+      </div>
+      <div id="mdhost">${renderMd(body, base + "/file?path=" + encodeURIComponent(file))}</div>
+      <div id="edithost" hidden>
+        <label class="hint" for="mdedit">Markdown (frontmatter preservato in automatico)</label>
+        <textarea id="mdedit" style="min-height:260px" spellcheck="false"></textarea>
+        <div class="toolbar"><button class="btn primary small" id="bSave">Salva</button><button class="btn small" id="bCancel">Annulla</button><span class="hint">Salvataggio rimette <b>draft</b> se era approvata.</span></div>
+      </div>
       <div class="card"><h3>Review</h3>
         <div class="segmented" role="group" aria-label="Stato di review">
           ${["draft", "reviewed", "versioned"].map((s) => `<button data-s="${s}" aria-pressed="${doc.review === s}"> ${s === "draft" ? "Draft" : s === "reviewed" ? "✓ Reviewed" : "✓✓ Versioned"}</button>`).join("")}
@@ -299,22 +352,103 @@ async function select(wiki, file, { silent } = {}) {
       };
     });
     let masked = false;
+    let piiSegs = [];
+    let piiEngine = "…";
+    const paintPii = () => {
+      if (masked) return;
+      if (!$("mdhost")) return;
+      let html = renderMd(body, base + "/file?path=" + encodeURIComponent(file));
+      // evidenzia valori PII come rizzo-pii: wrap con <mark data-label>
+      const seen = new Set();
+      for (const s of piiSegs) {
+        const val = body.slice(s.start, s.end);
+        if (!val || val.length < 2 || seen.has(s.label + "\0" + val)) continue;
+        seen.add(s.label + "\0" + val);
+        const rx = esc(val);
+        const cls = s.validated === false ? "pii doubtful" : "pii";
+        html = html.split(rx).join(`<mark class="${cls}" data-label="${esc(s.label)}" title="${esc(s.label)}${s.validated === false ? " · doubtful: Mask it / Send in clear" : ""} — click per dettagli">${rx}</mark>`);
+      }
+      $("mdhost").innerHTML = html;
+      $("mdhost").querySelectorAll("mark.pii").forEach((m) => {
+        m.onclick = () => piiDialog(m.dataset.label, m.textContent);
+      });
+    };
+    const loadPii = async () => {
+      const myWiki = wiki, myFile = file;
+      try {
+        const r = await post("/api/mask/preview", { text: body });
+        if (!state.sel || state.sel.wiki !== myWiki || state.sel.file !== myFile) return;
+        if (!$("piiHint") || !$("mdhost")) return;
+        piiSegs = r.segments || [];
+        piiEngine = r.engine || "?";
+        $("piiHint").textContent = piiSegs.length
+          ? `${piiSegs.length} PII via ${piiEngine} — click su un valore per dettagli`
+          : `Nessuna PII via ${piiEngine}`;
+        paintPii();
+      } catch {
+        if (!state.sel || state.sel.wiki !== myWiki || state.sel.file !== myFile) return;
+        if ($("piiHint")) $("piiHint").textContent = "PII non disponibile";
+      }
+    };
+    loadPii();
     $("bMask").onclick = (e) => {
       masked = !masked;
       e.currentTarget.textContent = masked ? "Mostra valori" : "Anteprima mask locale";
       e.currentTarget.setAttribute("aria-pressed", masked);
-      const t2 = masked
-        ? text.replace(/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/g, "[CF_1]").replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL_1]")
-        : text;
-      $("mdhost").innerHTML = renderMd(t2, base + "/file?path=" + encodeURIComponent(file));
+      if (masked) {
+        // mask locale sullo stesso body: placeholder come j-pii fake
+        let t2 = body;
+        const byLabel = {};
+        for (const s of piiSegs.length ? piiSegs : [{ label: "CF" }, { label: "EMAIL" }]) {
+          void s;
+        }
+        t2 = t2.replace(/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/g, "[CF_1]").replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL_1]");
+        // se engine reale, maschera anche gli altri valori rilevati
+        for (const s of piiSegs) {
+          const val = body.slice(s.start, s.end);
+          if (val && !/\[CF_1\]|\[EMAIL_1\]/.test(val)) {
+            byLabel[s.label] = (byLabel[s.label] || 0) + 1;
+            // usa contatore stabile per label solo se non già placeholder
+            if (s.label !== "CF" && s.label !== "EMAIL") t2 = t2.split(val).join(`[${s.label}_1]`);
+          }
+        }
+        $("mdhost").innerHTML = renderMd(t2, base + "/file?path=" + encodeURIComponent(file));
+      } else paintPii();
+    };
+    // tabs Anteprima | Modifica (inline, PUT preserva pairing)
+    $("mdedit").value = body;
+    const setTab = (edit) => {
+      $("tabPrev").setAttribute("aria-pressed", !edit);
+      $("tabEdit").setAttribute("aria-pressed", edit);
+      $("mdhost").hidden = edit;
+      $("edithost").hidden = !edit;
+      $("bMask").disabled = edit;
+    };
+    $("tabPrev").onclick = () => setTab(false);
+    $("tabEdit").onclick = () => setTab(true);
+    $("bCancel").onclick = () => { $("mdedit").value = body; setTab(false); };
+    $("bSave").onclick = async () => {
+      const v = $("mdedit").value;
+      if (!v.trim()) return toast("Testo vuoto: nessuna modifica salvata");
+      try {
+        const fm = parseFrontmatter(text);
+        const toSave = Object.keys(fm).length ? `---\n${Object.entries(fm).map(([k, val]) => `${k}: ${val}`).join("\n")}\n---\n\n${v}` : v;
+        const r = await fetch(`/api/wiki/${encodeURIComponent(wiki)}/file?path=${encodeURIComponent(file)}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markdown: toSave }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `errore ${r.status}`);
+        toast("Salvata (torna draft se era approvata)");
+        await select(wiki, file, { silent: true });
+      } catch (err) { toast("Errore salvataggio: " + err.message); }
     };
     $("btrash").onclick = () => trashVoceDialog(wiki, doc.name);
-    // originale + file wiki
+    // originale accoppiato: prima il raw collegato (meta.raw/frontmatter), poi gli altri
     const raws = meta.raw || [];
     const isImg = (n) => /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(n);
-    $("orig").innerHTML = `<h2>Originale</h2>` + (raws.length
-      ? raws.map((rn) => isImg(rn)
-        ? `<p><img class="doc" loading="lazy" alt="Originale ${esc(rn)}" src="${base}/file?path=${encodeURIComponent("raw/" + rn)}"></p><p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Scarica ${esc(rn)}</a></p>`
+    const ordered = pairedRaw ? [pairedRaw, ...raws.filter((r) => r !== pairedRaw)] : raws;
+    $("orig").innerHTML = `<h2>Originale${pairedRaw ? `: ${esc(pairedRaw)}` : ""}</h2><p class="hint">Accoppiato a <code>${esc(file)}</code>${pairedRaw ? ` via <code>raw/${esc(pairedRaw)}</code>` : " — senza originale collegato"}.</p>` + (ordered.length
+      ? ordered.map((rn) => isImg(rn)
+        ? `<p>${rn === pairedRaw ? "<span class=\"pill acc\">collegato</span> " : ""}<img class="doc" loading="lazy" alt="Originale ${esc(rn)}" src="${base}/file?path=${encodeURIComponent("raw/" + rn)}"></p><p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Scarica ${esc(rn)}</a></p>`
         : `<p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Apri originale (${esc(rn)})</a></p>`).join("")
       : `<p class="hint">Nessun originale allegato a questa voce.</p>`)
       + `<div class="card"><h3>File wiki</h3><p class="hint">Indice, skill e metadati generati in automatico.</p><p style="display:flex;gap:8px;flex-wrap:wrap">
@@ -328,12 +462,46 @@ async function select(wiki, file, { silent } = {}) {
   }
 }
 
-const slugStem = (n) => String(n).toLowerCase().replace(/\.[^.]+$/, "").replace(/[^a-z0-9]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
 function rawPreviewHTML(wiki, raw) {
   const url = `/api/wiki/${encodeURIComponent(wiki)}/file?path=${encodeURIComponent("raw/" + raw)}`;
   if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(raw)) return `<img class="doc" loading="lazy" alt="Originale ${esc(raw)}" src="${url}">`;
   if (/\.pdf$/i.test(raw)) return `<object data="${url}" type="application/pdf" width="100%" height="520" aria-label="Anteprima ${esc(raw)}"><p><a class="btn small" href="${url}" download="${esc(raw)}">Apri originale (${esc(raw)})</a></p></object>`;
   return `<p><a class="btn small" href="${url}" download="${esc(raw)}">Apri originale (${esc(raw)})</a></p>`;
+}
+
+/* dialog PII stile rizzo-pii: spiega placeholder/mapping, propone exclude */
+async function piiDialog(label, value) {
+  await openDialog({
+    title: `PII ${label}`,
+    bodyHTML: `<p>Valore rilevato: <code>${esc(value)}</code></p><p>Inviato all'LLM come <code translate="no">[${esc(label)}_1]</code> via <span translate="no">mask</span> j-pii. Il <span translate="no">mapping</span> resta solo locale.</p><p class="hint">Doubtful span = ti chiedo prima di mandarlo. Per falsi positivi (es. DATE nei nomi file) usa <code>JPII_EXCLUDE_TAGS</code> nei settings.</p>`,
+    actions: [{ label: "Chiudi", kind: "primary", value: null }],
+  });
+}
+
+/* editor minimale WP0: modifica md via PUT, preserva pairing raw */
+async function openEditorDialog(wiki, file, fullText) {
+  const current = stripFrontmatter(fullText);
+  const v = await openDialog({
+    title: `Modifica ${file}`,
+    bodyHTML: `<div class="field"><span><label for="f-md-edit">Markdown (frontmatter preservato in automatico)</label></span><textarea id="f-md-edit" style="min-height:220px" spellcheck="false">${esc(current)}</textarea><span class="hint">Salvataggio rimette <b>draft</b> se era reviewed/versioned. Originale collegato invariato.</span></div>`,
+    actions: [{ label: "Annulla", value: null }, { label: "Salva", kind: "primary", collect: (b) => b.querySelector("#f-md-edit").value }],
+  });
+  if (v === null || v === undefined) return;
+  if (!String(v).trim()) { toast("Testo vuoto: nessuna modifica salvata"); return; }
+  try {
+    // ricostruisci con frontmatter originale preservato dal server (update_file fa merge)
+    const fm = parseFrontmatter(fullText);
+    const toSave = fm && Object.keys(fm).length ? `---\n${Object.entries(fm).map(([k, val]) => `${k}: ${val}`).join("\n")}\n---\n\n${v}` : v;
+    const r = await fetch(`/api/wiki/${encodeURIComponent(wiki)}/file?path=${encodeURIComponent(file)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markdown: toSave }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || `errore ${r.status}`);
+    }
+    toast("Salvata (torna draft se era approvata)");
+    await select(wiki, file, { silent: true });
+  } catch (err) { toast("Errore salvataggio: " + err.message); }
 }
 
 /* originale già in wiki: immagine a sinistra, voce collegata (o converti) a destra */
@@ -345,8 +513,8 @@ async function selectRaw(wiki, raw) {
   $("conv").innerHTML = `<div class="skel" style="height:120px"></div>`;
   try {
     const meta = await api(`/api/wiki/${encodeURIComponent(wiki)}`);
-    const stem = slugStem(raw);
-    const doc = (meta.docs || []).find((x) => slugStem(x.file.split("/").pop()) === stem || slugStem(x.name) === stem);
+    const pair = resolvePair(meta.docs || [], meta.raw || [], raw);
+    const doc = (meta.docs || []).find((x) => x.file === pair.doc);
     if (doc) {
       state.sel = { wiki, file: doc.file };
       nav(`#/w/${encodeURIComponent(wiki)}/v/${encodeURIComponent(doc.file)}`);
