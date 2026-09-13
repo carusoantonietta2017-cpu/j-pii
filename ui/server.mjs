@@ -30,6 +30,49 @@ if (!process.env.JPII_PYTHON) {
 
 const daemon = new Daemon();
 
+// WP4 trasparenza LLM: storico invii al modello (mai valori veri, solo placeholder e conteggi)
+const llmLog = [];
+function logLlm(entry) {
+  llmLog.unshift({ t: new Date().toISOString(), ...entry });
+  if (llmLog.length > 100) llmLog.length = 100;
+}
+async function maskPreviewForLog(text) {
+  try {
+    const analyzer = process.env.JPII_ANALYZER ?? "real";
+    const sidecarUrl = process.env.JPII_SIDECAR_URL ?? "http://127.0.0.1:5005";
+    if (analyzer !== "fake") {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 8000);
+      try {
+        const r = await fetch(`${sidecarUrl}/analyze`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: String(text).slice(0, 8000), include_mapping: true }), signal: ctl.signal });
+        clearTimeout(timer);
+        if (r.ok) {
+          const data = await r.json();
+          const segs = Array.isArray(data.segments) ? data.segments : [];
+          const out = []; let cursor = 0;
+          const full = String(text);
+          for (const sg of segs) {
+            if (typeof sg.t !== "string" || !sg.t || typeof sg.label !== "string") continue;
+            const i = full.indexOf(sg.t, cursor);
+            if (i === -1) continue;
+            out.push({ start: i, end: i + sg.t.length, label: sg.label });
+            cursor = i + sg.t.length;
+            if (out.length >= 50) break;
+          }
+          return { segments: out, engine: "rizzo-pii" };
+        }
+      } catch { try { clearTimeout(timer); } catch {} }
+    }
+  } catch {}
+  const full = String(text || "");
+  const out = [];
+  for (const pat of [{ re: /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/g, label: "CF" }, { re: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, label: "EMAIL" }]) {
+    let m; while ((m = pat.re.exec(full)) !== null && out.length < 50) out.push({ start: m.index, end: m.index + m[0].length, label: pat.label });
+  }
+  out.sort((a, b) => a.start - b.start);
+  return { segments: out, engine: "fake" };
+}
+
 async function cli(args) {
 	try {
 		const { stdout } = await execFileAsync(
@@ -232,6 +275,11 @@ export function createApp() {
 				wikiRootExists = false;
 			}
 			return send(res, 200, { wikiRoot: config.wikiRoot, wikiRootExists, wikisCount, needsSetup: !wikiRootExists || wikisCount === 0 });
+			}
+
+			// GET /api/llm-log (WP4: storico masked, mai valori veri)
+			if (req.method === "GET" && url.pathname === "/api/llm-log") {
+				return send(res, 200, llmLog);
 			}
 
 			// GET /api/search?q=&stato=&wiki=  (ricerca globale sopra cli search)
@@ -614,6 +662,22 @@ export function createApp() {
 					};
 					const timeoutMs = Number(process.env.UI_CHAT_TIMEOUT_MS ?? 180000);
 					const jpiNotes = [];
+					let preSegs = [];
+					let preEngine = "none";
+					try {
+						const pre = await maskPreviewForLog(prompt);
+						preSegs = pre.segments || [];
+						preEngine = pre.engine || "none";
+					} catch {}
+					const phByLabel = {};
+					for (const sg of preSegs) phByLabel[sg.label] = (phByLabel[sg.label] || 0) + 1;
+					const placeholders = Object.entries(phByLabel).map(([k, n]) => `[${k}_x${n}]`);
+					const leakSuspect = preSegs.length > 0 && !body.sensitive;
+					let maskedSnippet = String(prompt).slice(0, 300);
+					try {
+						const vals = [...new Set(preSegs.map((sg) => String(prompt).slice(sg.start, sg.end)).filter(Boolean))].sort((a, b) => b.length - a.length).slice(0, 20);
+						for (const v of vals) maskedSnippet = maskedSnippet.split(v).join("[PII]");
+					} catch {}
 					const origConsoleError = console.error;
 					const runOnce = async () => {
 						const session = await getSession(sessionOpts);
@@ -657,6 +721,7 @@ export function createApp() {
 							resetSession();
 							console.error("[dock] prompt senza risposta dopo " + timeoutMs + " ms: sessione azzerata");
 							say({ type: "text_delta", delta: "Nessuna risposta entro " + Math.round(timeoutMs / 1000) + " secondi: ho azzerato la conversazione. Riprova con un messaggio semplice; se persiste, prova JPII_ANALYZER=fake o un altro modello via UI_MODEL." });
+							logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: preEngine, placeholders, piiCount: preSegs.length, leakSuspect, blocked: true, hint: "Timeout: sessione azzerata" });
 							say({ type: "done" });
 							return res.end();
 						}
@@ -668,9 +733,12 @@ export function createApp() {
 							throw err;
 						}
 					}
+					const blocked = !gotContent;
 					if (!gotContent) {
 						say({ type: "text_delta", delta: jpiBlockMessage(jpiNotes) });
+						say({ type: "log", event: "jpi-block" });
 					}
+					logLlm({ model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free", wiki: ctxWiki, voce: ctxVoce, promptChars: String(prompt).length, images: (body.images || []).length, ocr: !!body.ocr, sensitive: !!body.sensitive, engine: preEngine, placeholders, piiCount: preSegs.length, leakSuspect, blocked, hint: blocked ? "Bloccata da j-pii: apri Trasparenza per motivo e passa a mask" : leakSuspect ? "PII rilevata senza mask: attiva Sensibili (mask) o verifica placeholders" : "" });
 					say({ type: "done" });
 					return res.end();
 				} catch (err) {

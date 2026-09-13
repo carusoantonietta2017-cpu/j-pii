@@ -182,10 +182,10 @@ test("config, ricerca globale, trash e statici css", async () => {
 	assert.equal(css.status, 200);
 	assert.ok((css.headers.get("content-type") ?? "").includes("css"));
 	const html = await (await fetch(base + "/")).text();
-	for (const id of ["dockform", "gsearch", "dlg", "toast", "docknew", "newwikibtn", "themebtn", "dockassist", "dockpop", "dockpin"]) {
+	for (const id of ["dockform", "gsearch", "dlg", "toast", "docknew", "newwikibtn", "themebtn", "dockassist", "dockpop", "dockpin", "llmrefresh"]) {
 		assert.ok(html.includes(`id="${id}"`), `manca #${id} in index.html`);
 	}
-	for (const tid of ['nav-sidebar', 'nav-wiki-list', 'viewer-split', 'viewer-original', 'editor-md', 'dock', 'dock-log']) {
+	for (const tid of ['nav-sidebar', 'nav-wiki-list', 'viewer-split', 'viewer-original', 'editor-md', 'dock', 'dock-log', 'llm-log']) {
 		assert.ok(html.includes(`data-testid="${tid}"`), `manca data-testid ${tid}`);
 	}
 });
@@ -252,6 +252,13 @@ test("chat con modello inesistente risponde errore, mai muta", async () => {
 		delete process.env.UI_MODEL;
 		await j("/api/chat/new", { method: "POST", body: "{}" });
 	}
+});
+
+test("llm-log trasparenza: array vuoto poi hint senza valori veri", async () => {
+	const r = await j("/api/llm-log");
+	assert.equal(r.status, 200);
+	assert.ok(Array.isArray(r.body));
+	assert.ok(!JSON.stringify(r.body).includes("RSSMRA"));
 });
 
 test("chat con context wiki/voce non rompe SSE + guard raw nei tool", async () => {

@@ -102,6 +102,12 @@
     <input type="file" id="dockimg" accept="image/*,.pdf" multiple aria-label="Allega immagini o PDF">
   </div>
   <div id="dockfiles" aria-live="polite"></div>
+  <details id="llmlogbox" data-testid="llm-log">
+    <summary>Trasparenza: cosa vede l'LLM <span class="hint" id="llmcount"></span></summary>
+    <div id="llmwarn" role="alert" hidden></div>
+    <div id="llmlog" aria-live="polite"></div>
+    <div class="toolbar"><button id="llmrefresh" class="mini" type="button">Aggiorna log</button></div>
+  </details>
   <form id="dockform">
     <input id="dockin" type="text" name="comando" autocomplete="off" placeholder="Chiedi all’agente, es. crea una wiki con questi file…" aria-label="Comando per l’agente">
     <button class="btn primary" id="docksend" type="submit">Invia</button>

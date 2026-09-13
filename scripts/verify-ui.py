@@ -332,6 +332,13 @@ def main():
                 assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
             step("dock dual-mode embedded<->popup", s_dockmode)
 
+            def s_llmlog():
+                assert pg.locator('[data-testid="llm-log"]').count() == 1
+                pg.locator("#llmrefresh").evaluate("b=>b.click()")
+                pg.wait_for_timeout(600)
+                assert "cosa vede" in pg.locator("#llmlogbox").inner_text().lower()
+            step("trasparenza LLM: pannello + log", s_llmlog)
+
             def s_dock():
                 assert pg.locator("#dockmodel").inner_text().strip() not in ("", "…") or True
                 pg.locator("#docknew").click()

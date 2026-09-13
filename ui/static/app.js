@@ -991,8 +991,24 @@ $("dockform").addEventListener("submit", async (e) => {
     typing.remove();
     btn.disabled = false;
     btn.textContent = label;
+    try { refreshLlmLog(); } catch {}
   }
 });
+/* ---------- trasparenza LLM WP4 ---------- */
+async function refreshLlmLog() {
+  try {
+    const rows = await api("/api/llm-log");
+    const box = $("llmlog");
+    const warn = $("llmwarn");
+    $("llmcount").textContent = rows.length ? `(${rows.length})` : "";
+    const bad = rows.find((r) => r.blocked || r.leakSuspect);
+    if (bad) {
+      warn.hidden = false;
+      warn.innerHTML = `⚠️ ${esc(bad.hint || "Verifica invio")} — apri la prima riga e passa a <b>Sensibili (mask)</b> con estensione j-pii.`;
+    } else warn.hidden = true;
+    box.innerHTML = rows.length ? rows.slice(0, 20).map((r) => `<div class="card"><h3>${esc(r.t || "")} · ${esc(r.model || "")}</h3><p>wiki <code>${esc(r.wiki || "—")}</code> voce <code>${esc(r.voce || "—")}</code> · prompt <b class="num">${r.promptChars ?? 0}</b> caratteri · img ${r.images ?? 0} · OCR ${r.ocr ? "sì" : "no"} · mask ${r.sensitive ? "sì" : "no"}</p><p>PII <b class="num">${r.piiCount ?? 0}</b> via ${esc(r.engine || "?")} ${(r.placeholders || []).map((ph) => `<code translate="no">${esc(ph)}</code>`).join(" ")} ${r.blocked ? `<span class="pill warn">bloccata</span>` : ""} ${r.leakSuspect && !r.blocked ? `<span class="pill warn">senza mask</span>` : ""}</p>${r.hint ? `<p class="hint">${esc(r.hint)}</p>` : ""}</div>`).join("") : `<p class="hint">Nessun invio ancora. Scrivi all'agente: qui vedrai caratteri, placeholder e alert, mai valori veri.</p>`;
+  } catch { /* log assente: ignora */ }
+}
 document.querySelectorAll("#chips button").forEach((b) => {
   b.onclick = () => { $("dockin").value = b.dataset.q; $("dockform").requestSubmit(); };
 });
@@ -1095,6 +1111,7 @@ window.addEventListener("hashchange", () => {
 (function init() {
   initTheme();
   try { initDockMode(); } catch {}
+  try { $("llmrefresh").onclick = () => refreshLlmLog(); refreshLlmLog(); } catch {}
   try {
     const o = opts();
     if (o.engine) { const d = $("dockengine"); if (d) d.value = o.engine; }
