@@ -683,9 +683,9 @@ export function createApp() {
 					const ctxVoce = String(ctx.voce || "").slice(0, 128);
 					let prompt = body.message ?? "";
 					if (ctxWiki || ctxVoce) {
-						prompt = `[Contesto wiki${ctxWiki ? ` "${ctxWiki}"` : ""}${ctxVoce ? ` voce "${ctxVoce}"` : ""}. Usa solo doc/*.md via wiki_search/list (mai raw/, mai path assoluti). I file originali restano locali: se serve un originale, usa la trascrizione md collegata. Rispondi con placeholder, mai valori sensibili in chiaro.]\n\n` + prompt;
+						prompt = `[Contesto wiki${ctxWiki ? ` "${ctxWiki}"` : ""}${ctxVoce ? ` voce "${ctxVoce}"` : ""}. Strumenti: wiki_get per leggere una voce nota (1 chiamata), wiki_search solo per trovare, wiki_list per elencare. Mai raw/, mai path assoluti: gli originali restano locali, usa la trascrizione md. Masking PII automatico via j-pii: rispondi normalmente e riporta fedelmente i placeholder che i tool restituiscono ([CF_1], [FULLNAME_1]...), senza inventarne altri tipo <placeholder>. Per creare: wiki_add con titolo e markdown veri e completi.]\n\n` + prompt;
 					} else {
-						prompt = `[Contesto wiki non selezionata. Usa wiki_search/list su doc/*.md, mai raw/.]\n\n` + prompt;
+						prompt = `[Contesto wiki non selezionata. Strumenti: wiki_get per voce nota, wiki_search per trovare, wiki_list per elencare. Mai raw/. Masking automatico: riporta i placeholder reali, non inventarli.]\n\n` + prompt;
 					}
 					const sdkImages = [];
 					for (const img of images) {
@@ -703,14 +703,15 @@ export function createApp() {
 						const flat = (args || []).join(" ");
 						if (/\braw\//.test(flat) || flat.includes("..")) throw new Error("Originali non esposti al modello: usa la trascrizione doc/*.md collegata");
 						if (extra.markdown) {
-							// wiki_add via agent: ["add", wiki, file?, --titolo?] -> file da markdown
+							// wiki_add via agent: ["add", wiki, file?, --titolo?] -> file da markdown (filtra stringhe vuote: bug add)
 							const dir = mkdtempSync(join(tmpdir(), "ocr-pi-dockadd-"));
 							const file = join(dir, "voce.md");
 							writeFileSync(file, extra.markdown);
 							const head = args.slice(0, 2);
-							return cli([...head, file, ...args.slice(2)]);
+							const tail = (args.slice(2) || []).filter((a) => String(a ?? "").trim() !== "");
+							return cli([...head, file, ...tail]);
 						}
-						return cli(args);
+						return cli((args || []).filter((a) => String(a ?? "").trim() !== ""));
 					};
 					const sessionOpts = {
 						cli: dockCli,
@@ -748,6 +749,13 @@ export function createApp() {
 							if (event.type === "tool_execution_start") {
 								innerGot = true;
 								say({ type: "tool", tool: event.toolName });
+							}
+							if (event.type === "message_end" && event.message && event.message.role === "assistant") {
+								try {
+									const blocks = Array.isArray(event.message.content) ? event.message.content : [];
+									const txt = blocks.filter((b) => b && b.type === "text" && typeof b.text === "string").map((b) => b.text).join("");
+									if (txt.trim()) { innerGot = true; say({ type: "restored", text: txt }); }
+								} catch {}
 							}
 						});
 						let timer;

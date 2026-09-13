@@ -78,6 +78,19 @@ def search(root, query: str, stato=None, wiki=None) -> list:
     return hits
 
 
+def get_content(root, wiki: str, voce: str) -> dict:
+    """Contenuto pieno di una voce (per wiki_get agente): 1 chiamata invece di N search."""
+    d = _require_wiki(root, wiki)
+    meta = _load_meta(d)
+    for x in meta["docs"]:
+        if x["name"] == voce or Path(x["file"]).stem == slugify(voce) or x["file"] == voce:
+            p = d / x["file"]
+            if not p.exists():
+                raise LookupError(f"file voce mancante: {x['file']}")
+            return {"name": x["name"], "file": x["file"], "review": x.get("review", ""), "raw": x.get("raw", ""), "content": p.read_text(encoding="utf-8")}
+    raise LookupError(f"voce assente: {voce}")
+
+
 def show(root, wiki: str, voce: str) -> Path:
     """Ritorna il path del md della voce (l'editing avviene nell'editor)."""
     d = _require_wiki(root, wiki)

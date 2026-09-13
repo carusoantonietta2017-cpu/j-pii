@@ -922,7 +922,14 @@ function dockSay(who, text) {
   w.className = "who";
   w.textContent = who + ": ";
   div.appendChild(w);
-  div.appendChild(document.createTextNode(String(text).replace(/\*\*/g, "")));
+  if (who === "pi" && !String(text).startsWith("(uso ")) {
+    // risposte pi in markdown (tabelle/liste) come nel viewer, mai script: renderMd fa escape
+    const body = document.createElement("div");
+    body.innerHTML = renderMd(String(text), "");
+    div.appendChild(body);
+  } else {
+    div.appendChild(document.createTextNode(String(text).replace(/\*\*/g, "")));
+  }
   host.appendChild(div);
   host.scrollTop = host.scrollHeight;
   return div;
@@ -976,20 +983,32 @@ $("dockform").addEventListener("submit", async (e) => {
     const text = await r.text();
     let piAnswered = false;
     let streamEl = null; // i delta di una risposta si accumulano in un solo fumetto
+    let piRaw = "";
     for (const line of text.split("\n")) {
       if (!line.startsWith("data: ")) continue;
       let ev;
       try { ev = JSON.parse(line.slice(6)); } catch { continue; }
       if (ev.type === "text_delta") {
         piAnswered = true;
+        piRaw += ev.delta;
         if (streamEl) {
-          streamEl.appendChild(document.createTextNode(ev.delta));
-          $("docklog").scrollTop = $("docklog").scrollHeight;
+          streamEl.remove();
+          streamEl = dockSay("pi", piRaw);
         } else {
-          streamEl = dockSay("pi", ev.delta);
+          streamEl = dockSay("pi", piRaw);
         }
       }
       else if (ev.type === "tool") { piAnswered = true; streamEl = null; dockSay("pi", `(uso ${ev.tool}…)`); }
+      else if (ev.type === "restored") {
+        piAnswered = true;
+        // j-pii replace: il messaggio finale ha i valori veri al posto dei placeholder
+        if (streamEl) { streamEl.remove(); streamEl = null; }
+        // rimuovi eventuale bolla placeholder parziale precedente prima di mostrare il restored
+        const msgs = $("docklog").querySelectorAll(".msg.pi");
+        if (msgs.length) msgs[msgs.length - 1].remove();
+        streamEl = dockSay("pi", ev.text);
+        piRaw = ev.text;
+      }
     }
     if (!piAnswered) dockSay("pi", "Nessuna risposta: premi “Nuova conversazione” e riprova; se persiste, avvia con JPII_ANALYZER=fake per escludere il sidecar j-pii.");
   } catch (err) {

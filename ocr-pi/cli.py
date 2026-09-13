@@ -47,6 +47,10 @@ def cmd_show(a):
     out({"file": str(p)} if a.json else str(p), a.json)
 
 
+def cmd_get(a):
+    out(manager.get_content(a.root, a.wiki, a.voce), a.json)
+
+
 def cmd_add(a):
     out(manager.add(a.root, a.wiki, a.file, title=a.titolo, raw_source=getattr(a, "raw", None)), a.json)
 
@@ -96,6 +100,7 @@ def main(argv=None) -> int:
     p.add_argument("--stato", default=None); p.add_argument("--wiki", default=None)
     p.set_defaults(f=cmd_search)
     p = sub.add_parser("show"); p.add_argument("wiki"); p.add_argument("voce"); p.set_defaults(f=cmd_show)
+    p = sub.add_parser("get"); p.add_argument("wiki"); p.add_argument("voce"); p.set_defaults(f=cmd_get)
     p = sub.add_parser("add"); p.add_argument("wiki"); p.add_argument("file")
     p.add_argument("--titolo", default=None); p.add_argument("--raw", default=None)
     p.set_defaults(f=cmd_add)
