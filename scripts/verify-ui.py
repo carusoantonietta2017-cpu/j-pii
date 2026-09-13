@@ -295,6 +295,8 @@ def main():
                 pg.wait_for_selector("#orig img.doc", timeout=8000)
                 assert "collegato" in pg.locator("#orig").inner_text().lower()
                 assert "accoppiato" in pg.locator("#orig").inner_text().lower()
+                assert pg.locator("#orig > p > img.doc").count() == 1, "a sinistra solo l'originale accoppiato"
+                assert "altri originali" in pg.locator("#orig").inner_text().lower()
                 # tabs editor presenti (WP2)
                 assert pg.locator("#tabPrev").count() == 1
                 pg.locator("#tabEdit").click()
@@ -310,6 +312,10 @@ def main():
                 pg.locator("#dockpop").evaluate("b=>b.click()")
                 pg.wait_for_timeout(300)
                 assert pg.locator("#dock").get_attribute("data-mode") == "floating"
+                assert pg.locator("#docknew").is_visible(), "Nuova conversazione deve restare visibile nel popup"
+                rs = pg.locator("#dock").evaluate("d=>{const c=getComputedStyle(d);return {resize:c.resize,minW:c.minWidth,maxW:c.maxWidth}}")
+                assert rs["resize"] == "both", f"popup ridimensionabile atteso, got {rs}"
+                assert rs["minW"] == "320px"
                 assert pg.evaluate("localStorage.getItem('ocr-pi-dockmode')") == "floating"
                 pg.screenshot(path=f"{SHOTS}/10a-dock-floating.png")
                 pg.locator("#dockpin").evaluate("b=>b.click()")

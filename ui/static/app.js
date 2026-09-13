@@ -461,12 +461,13 @@ async function select(wiki, file, { silent } = {}) {
     // originale accoppiato: prima il raw collegato (meta.raw/frontmatter), poi gli altri
     const raws = meta.raw || [];
     const isImg = (n) => /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(n);
-    const ordered = pairedRaw ? [pairedRaw, ...raws.filter((r) => r !== pairedRaw)] : raws;
-    $("orig").innerHTML = `<h2>Originale${pairedRaw ? `: ${esc(pairedRaw)}` : ""}</h2><p class="hint">Accoppiato a <code>${esc(file)}</code>${pairedRaw ? ` via <code>raw/${esc(pairedRaw)}</code>` : " — senza originale collegato"}.</p>` + (ordered.length
-      ? ordered.map((rn) => isImg(rn)
-        ? `<p>${rn === pairedRaw ? "<span class=\"pill acc\">collegato</span> " : ""}<img class="doc" loading="lazy" alt="Originale ${esc(rn)}" src="${base}/file?path=${encodeURIComponent("raw/" + rn)}"></p><p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Scarica ${esc(rn)}</a></p>`
-        : `<p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Apri originale (${esc(rn)})</a></p>`).join("")
-      : `<p class="hint">Nessun originale allegato a questa voce.</p>`)
+    const others = (raws || []).filter((r) => r !== pairedRaw);
+    const singleHtml = (rn) => isImg(rn)
+      ? `<p><img class="doc" loading="lazy" alt="Originale ${esc(rn)}" src="${base}/file?path=${encodeURIComponent("raw/" + rn)}"></p><p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Scarica ${esc(rn)}</a></p>`
+      : `<p><a class="btn small" href="${base}/file?path=${encodeURIComponent("raw/" + rn)}" download>Apri originale (${esc(rn)})</a></p>`;
+    $("orig").innerHTML = `<h2>Originale${pairedRaw ? `: ${esc(pairedRaw)}` : ""}</h2><p class="hint">Accoppiato a <code>${esc(file)}</code>${pairedRaw ? ` via <code>raw/${esc(pairedRaw)}</code>` : " — senza originale collegato"}.</p>`
+      + (pairedRaw ? `<p><span class="pill acc">collegato</span></p>` + singleHtml(pairedRaw) : `<p class="hint">Nessun originale allegato a questa voce.</p>`)
+      + (others.length ? `<details><summary>Altri originali della wiki (${others.length})</summary>` + others.map(singleHtml).join("") + `</details>` : ``)
       + `<div class="card"><h3>File wiki</h3><p class="hint">Indice, skill e metadati generati in automatico.</p><p style="display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn small" href="${base}/file?path=${encodeURIComponent("index.md")}">index.md</a>
         <a class="btn small" href="${base}/file?path=${encodeURIComponent("SKILL.md")}">SKILL.md</a>
