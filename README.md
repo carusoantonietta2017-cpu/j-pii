@@ -301,4 +301,45 @@ chromium` (oppure il Chrome già in `~/.cache/ms-playwright`).
 `--selftest` + demo, hook in pi con immagine vera (capitolo 5.1, 3 min di
 pazienza la prima volta), PWA su `PORT=8001`.
 
+## 9. Scenario cfsens — chiaro in chat, codificato nel log
+
+La prova che dimostra il principio del progetto: i valori veri non lasciano
+mai il computer, all'LLM viaggiano solo segnaposto, tu li rivedi in chiaro.
+
+**Preparazione** (una volta): crea la wiki `demo` con una voce `cfsens`
+contenente CF veri in chiaro, telefoni e nomi. Esempio minimo:
+
+```md
+| ID | Nome e Cognome | Codice Fiscale | Telefono |
+| --- | --- | --- | --- |
+| 1 | Rossi Mario | RSSMRA80A01H501U | +39 333 1234567 |
+| 2 | Bianchi Laura | BNCLRA85M52F205X | +39 347 9876543 |
+```
+
+**Passo 1 — seleziona la voce giusta.** Click su `cfsens` in sidebar.
+A destra vedi l'highlight PII (`2 PII via fake`), a sinistra l'originale
+accoppiato se c'è.
+
+![Selezione cfsens con highlight](docs/shots/prove-cfsens/01-selezione.png)
+
+**Passo 2 — chiedi all'agente con mask attiva.** Nel dock spunta
+`Sensibili (mask)`, premi `Nuova conversazione` per pulire contesto e
+mapping vecchi, poi scrivi `leggi doc/cfsens.md e mostrami come tabella
+markdown`. Atteso: 1 solo `(uso wiki_get…)` e tabella **formattata** con
+CF, nomi e telefoni **in chiaro**.
+
+![Tabella in chiaro nel dock](docs/shots/prove-cfsens/02-dock-tabella-chiara.png)
+
+**Passo 3 — verifica cosa è partito.** Sotto il dock apri
+`Trasparenza: cosa vede l'LLM` e premi `Aggiorna log`. Atteso: ultima riga
+con `PII 2 via fake [CF_1] inviato codificato [CF_2] inviato codificato` e
+`Inviati codificati 2 placeholder, vedi valori in chiaro in chat`. Nel log
+mai valori veri, solo conteggi e segnaposto.
+
+![Log con placeholder codificati](docs/shots/prove-cfsens/03-log-codificati.png)
+
+Se vedi ancora `[CF_1]` in chat: hai dimenticato `Nuova conversazione` o
+`Sensibili (mask)`, oppure il contesto in alto dice un'altra voce
+(es. `doc/testqqq.md`): riseleziona `cfsens` e ripeti dal passo 2.
+
 Dettagli tecnici: `docs/research/`, `bench/corpus/`, `docs/agents/`, `docs/plans/`, `docs/shots/`, `scripts/verify-ui.py`, tracker GitHub.
