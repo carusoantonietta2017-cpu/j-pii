@@ -1019,6 +1019,15 @@ function setDockMode(mode) {
   d.dataset.mode = mode;
   try { localStorage.setItem("ocr-pi-dockmode", mode); } catch {}
   const floating = mode === "floating";
+  if (!floating) {
+    // pulizia stili inline di drag/resize popup: altrimenti restano in embedded e rompono il layout
+    d.style.removeProperty("right");
+    d.style.removeProperty("bottom");
+    d.style.removeProperty("left");
+    d.style.removeProperty("top");
+    d.style.removeProperty("width");
+    d.style.removeProperty("height");
+  }
   $("dockpop").hidden = floating;
   $("dockpin").hidden = !floating;
   $("dockassist").setAttribute("aria-expanded", floating || d.classList.contains("open"));

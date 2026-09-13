@@ -324,6 +324,19 @@ def main():
                 pg.locator("#dockassist").evaluate("b=>b.click()")
                 pg.wait_for_timeout(300)
                 assert pg.locator("#dock").get_attribute("data-mode") == "floating"
+                # regressione: resize+drag popup poi riaggancia deve tornare pulito
+                pg.locator("#dockpop").evaluate("b=>b.click()")
+                pg.wait_for_timeout(200)
+                pg.locator("#dock").evaluate("d=>{d.style.width='700px';d.style.height='500px';d.style.right='100px';d.style.bottom='100px'}")
+                pg.wait_for_timeout(200)
+                pg.locator("#dockpin").evaluate("b=>b.click()")
+                pg.wait_for_timeout(300)
+                assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
+                st = pg.locator("#dock").evaluate("d=>({w:d.style.width,h:d.style.height,r:d.style.right,b:d.style.bottom})")
+                assert st == {"w": "", "h": "", "r": "", "b": ""}, f"stili popup rimasti in embedded: {st}"
+                bw = pg.locator("#dock").evaluate("d=>d.getBoundingClientRect().width")
+                vw = pg.evaluate("window.innerWidth")
+                assert bw > vw * 0.8, f"dock embedded troppo stretto dopo popup: {bw}/{vw}"
                 pg.keyboard.press("Escape")
                 pg.wait_for_timeout(300)
                 assert pg.locator("#dock").get_attribute("data-mode") == "embedded"
