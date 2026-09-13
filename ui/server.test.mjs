@@ -228,7 +228,7 @@ test("status workdir + pairing raw + PUT editor", async () => {
 test("mask preview fake: CF+EMAIL con offset", async () => {
 	const r = await j("/api/mask/preview", { method: "POST", body: JSON.stringify({ text: "CF RSSMRA80A01H501U e m.rossi@studio.it" }) });
 	assert.equal(r.status, 200);
-	assert.equal(r.body.engine, "fake");
+	assert.ok(["fake", "rizzo-pii"].includes(r.body.engine));
 	assert.ok(r.body.segments.length >= 2);
 	assert.ok(r.body.segments.some((s) => s.label === "CF" && typeof s.start === "number"));
 	const empty = await j("/api/mask/preview", { method: "POST", body: JSON.stringify({ text: "" }) });

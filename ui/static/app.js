@@ -111,13 +111,29 @@ function openDialog({ title, bodyHTML, actions = [{ label: "Chiudi", value: null
 
 /* ---------- markdown ---------- */
 function renderMd(md, fileUrl) {
-  const dir = String(fileUrl || "").split("/").slice(0, -1).join("/");
+  // risolve asset relativi tipo assets/x.png rispetto al file md (via ?path=, con encoding corretto)
+  const resolveImg = (src) => {
+    const s = String(src).trim();
+    if (/^(javascript|vbscript|data:text\/html)/i.test(s)) return null;
+    if (s.startsWith("http") || s.startsWith("/") || s.startsWith("blob:") || s.startsWith("data:")) return s;
+    const fu = String(fileUrl || "");
+    const m = fu.match(/^(\/api\/wiki\/[^/]+)\/file\?path=(.+)$/);
+    if (m) {
+      try {
+        const cur = decodeURIComponent(m[2]);
+        const dir = cur.includes("/") ? cur.slice(0, cur.lastIndexOf("/")) : "";
+        const joined = dir ? dir + "/" + s : s;
+        return m[1] + "/file?path=" + encodeURIComponent(joined);
+      } catch { /* fallback sotto */ }
+    }
+    const dir = fu.split("/").slice(0, -1).join("/");
+    return dir ? dir + "/" + s : s;
+  };
   const imgTag = (tok) => {
     const m = tok.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
     if (!m) return esc(tok);
-    const s = m[2].trim();
-    if (/^(javascript|vbscript|data:text\/html)/i.test(s)) return esc(m[1]);
-    const u = s.startsWith("http") || s.startsWith("/") || s.startsWith("blob:") || s.startsWith("data:") ? s : (dir ? dir + "/" + s : s);
+    const u = resolveImg(m[2]);
+    if (u === null) return esc(m[1]);
     return `<img class="doc" loading="lazy" alt="${esc(m[1])}" src="${esc(u)}">`;
   };
   const inline = (raw) => {
@@ -544,7 +560,7 @@ async function convertRawFile(wiki, raw) {
     const r = await post(`/api/wiki/${encodeURIComponent(wiki)}/convert-raw`, { file: raw, engine: o.engine || "docling", pages: o.pages || null, deskew: !!o.deskew });
     const url = `/api/wiki/${encodeURIComponent(wiki)}/file?path=${encodeURIComponent("raw/" + raw)}`;
     const mime = /\.pdf$/i.test(raw) ? "application/pdf" : "image/*";
-    showConverted(raw, r, url, mime, wiki, raw.replace(/\.[^.]+$/, ""));
+    showConverted(raw, r, url, mime, wiki, raw.replace(/\.[^.]+$/, ""), { rawWiki: wiki, rawFile: raw });
     toast("Convertita: premi “Salva in wiki”");
   } catch (err) {
     $("conv").innerHTML = `<div class="empty"><div class="big" aria-hidden="true">⚠️</div><p>Conversione fallita: ${esc(err.message)}</p><p><button class="btn" id="bretry">Riprova</button></p></div>`;
@@ -751,7 +767,7 @@ $("trashbtn").onclick = () => showTrash(currentWiki());
 $("newwikibtn").onclick = () => newWikiDialog();
 
 /* ---------- converti ---------- */
-function showConverted(name, r, objUrl, mime, wikiHint, titleHint) {
+function showConverted(name, r, objUrl, mime, wikiHint, titleHint, rawInfo) {
   state.search = null;
   renderCrumbs(null);
   $("crumbs").innerHTML = `<nav aria-label="Breadcrumb"><b>Anteprima non salvata</b><span class="pill num">${fmtSec(r.seconds)} s</span><span class="pill">${esc(r.engine || "")}</span></nav>`;
@@ -782,9 +798,11 @@ function showConverted(name, r, objUrl, mime, wikiHint, titleHint) {
     });
     if (!v || !v.w || !v.t) { if (v) toast("Scrivi wiki e titolo, poi riprova"); return; }
     try {
-      await post(`/api/wiki/${encodeURIComponent(v.w)}/add`, { markdown: r.markdown, title: v.t, assets: r.assets || [] });
-      toast("Salvata come draft");
+      const payload = { markdown: r.markdown, title: v.t, assets: r.assets || [], ...(rawInfo || {}) };
+      const saved = await post(`/api/wiki/${encodeURIComponent(v.w)}/add`, payload);
+      toast("Salvata come draft con originale collegato");
       await refresh();
+      try { await select(v.w, saved.file); } catch { /* fallback: resta su refresh */ }
     } catch (err) { toast("Errore: " + err.message); }
   };
 }
@@ -819,7 +837,9 @@ async function runUploadConvert() {
     for (const x of new Uint8Array(up.buf)) binary += String.fromCharCode(x);
     const o = opts();
     const r = await post("/api/convert-upload", { name: up.name, dataBase64: btoa(binary), engine: o.engine || "docling", pages: o.pages || null, deskew: !!o.deskew });
-    showConverted(up.name, r, URL.createObjectURL(new Blob([up.buf], { type: up.mime || "application/octet-stream" })), up.mime || "", undefined, undefined);
+    let _bin = "";
+    for (const x of new Uint8Array(up.buf)) _bin += String.fromCharCode(x);
+    showConverted(up.name, r, URL.createObjectURL(new Blob([up.buf], { type: up.mime || "application/octet-stream" })), up.mime || "", undefined, undefined, { rawName: up.name, rawDataBase64: btoa(_bin) });
     toast("Convertita: premi “Salva in wiki”");
   } catch (err) {
     $("conv").innerHTML = `<div class="empty"><div class="big" aria-hidden="true">⚠️</div><p>Conversione fallita: ${esc(err.message)}</p><p><button class="btn" id="bretry3">Riprova</button></p></div>`;
@@ -875,9 +895,10 @@ async function convertServerFile(path) {
       });
       if (!v || !v.w) return;
       try {
-        await post(`/api/wiki/${encodeURIComponent(v.w)}/add`, { markdown: r.markdown, title: v.t || base });
-        toast("Salvata come draft");
+        const saved = await post(`/api/wiki/${encodeURIComponent(v.w)}/add`, { markdown: r.markdown, title: v.t || base, rawPath: path });
+        toast("Salvata come draft con originale collegato");
         await refresh();
+        try { await select(v.w, saved.file); } catch { /* resta su refresh */ }
       } catch (err) { toast("Errore: " + err.message + " — cambia titolo o wiki e riprova"); }
     };
     toast("Convertita: premi “Salva in wiki”");

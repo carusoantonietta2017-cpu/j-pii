@@ -179,7 +179,7 @@ export function createApp() {
 						const t = setTimeout(() => ctl.abort(), 15000);
 						const r = await fetch(`${sidecarUrl}/analyze`, {
 							method: "POST", headers: { "Content-Type": "application/json" },
-							body: JSON.stringify({ text, include_mapping: false }), signal: ctl.signal,
+							body: JSON.stringify({ text, include_mapping: true }), signal: ctl.signal,
 						});
 						clearTimeout(t);
 						if (r.ok) {
@@ -485,7 +485,20 @@ export function createApp() {
 					const rdir = mkdtempSync(join(tmpdir(), "ocr-pi-raw-"));
 				rawTmp = join(rdir, String(body.rawName).split("/").pop().replace(/[^\w.\-]+/g, "_"));
 					writeFileSync(rawTmp, Buffer.from(body.rawDataBase64, "base64"));
-				} else if (body.rawPath) {
+				} else if (body.rawWiki && body.rawFile) {
+                    const rw = String(body.rawWiki).replace(/\\/g, "/");
+                    const rf = String(body.rawFile).replace(/\\/g, "/").split("/").pop();
+                    if (!rw || !rf || rw.includes("..") || rf.includes("..")) return send(res, 400, { error: "raw non valido" });
+                    const rp2 = normalize(join(config.wikiRoot, "wiki", rw, "raw", rf));
+                    const wdir2 = normalize(join(config.wikiRoot, "wiki", rw));
+                    if (rp2 !== wdir2 && !rp2.startsWith(wdir2 + sep)) return send(res, 403, { error: "raw fuori dalla wiki" });
+                    try {
+                        if (!(await stat(rp2)).isFile()) return send(res, 404, { error: "raw assente" });
+                    } catch {
+                        return send(res, 404, { error: "raw assente" });
+                    }
+                    rawTmp = rp2;
+                } else if (body.rawPath) {
 					const rp = normalize(String(body.rawPath).replace(/\\/g, "/"));
 					const roots = [resolve(config.wikiRoot), ...(await readSources()).map((s) => normalize(resolve(String(s))))];
 					const inside = roots.some((r) => rp === r || rp.startsWith(r + sep));

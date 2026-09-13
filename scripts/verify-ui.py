@@ -282,6 +282,28 @@ def main():
                 assert "draft" in pg.content().lower()
             step("upload fake → salva", s_upload_fake)
 
+            def s_pairing_persist():
+                # bug utente: dopo save, selezionando l'md deve restare l'originale accoppiato
+                det = api(base, "/api/wiki/demo")
+                docs = det.get("docs", det) if isinstance(det, dict) else det
+                pair = next((d for d in docs if d["file"] == "doc/tiny.md"), None)
+                assert pair is not None, f"voce x non trovata: {det}"
+                assert pair.get("raw"), f"pairing perso dopo save: {pair}"
+                # via UI: click voce tiny -> orig deve mostrare img collegata
+                pg.locator('#wikis button', has_text="tiny").first.click()
+                pg.wait_for_selector("#mdhost", timeout=8000)
+                pg.wait_for_selector("#orig img.doc", timeout=8000)
+                assert "collegato" in pg.locator("#orig").inner_text().lower()
+                assert "accoppiato" in pg.locator("#orig").inner_text().lower()
+                # tabs editor presenti (WP2)
+                assert pg.locator("#tabPrev").count() == 1
+                pg.locator("#tabEdit").click()
+                pg.wait_for_timeout(300)
+                assert pg.locator("#mdedit").is_visible()
+                pg.locator("#tabPrev").click()
+                pg.screenshot(path=f"{SHOTS}/09b-pairing.png")
+            step("pairing persiste dopo save (bug originale)", s_pairing_persist)
+
             def s_dock():
                 assert pg.locator("#dockmodel").inner_text().strip() not in ("", "…") or True
                 pg.locator("#docknew").click()
