@@ -42,11 +42,11 @@ export function makeTools({ cli, daemonConvert, wikiRoot }) {
 // --- sessione SDK (caricata solo all'uso: import dinamico, niente costo nei test) ---
 let sessionPromise = null;
 
-export async function getSession({ cli, daemonConvert, jpiExtension, model: modelRef }) {
+export async function getSession({ cli, daemonConvert, jpiExtension, extraExtensions = [], model: modelRef }) {
 	if (sessionPromise) return sessionPromise;
 	sessionPromise = (async () => {
 		try {
-			return await createSession({ cli, daemonConvert, jpiExtension, modelRef });
+			return await createSession({ cli, daemonConvert, jpiExtension, extraExtensions, modelRef });
 		} catch (err) {
 			// mai avvelenare la cache: il prossimo messaggio riprova da zero
 			sessionPromise = null;
@@ -56,7 +56,7 @@ export async function getSession({ cli, daemonConvert, jpiExtension, model: mode
 	return sessionPromise;
 }
 
-async function createSession({ cli, daemonConvert, jpiExtension, modelRef }) {
+async function createSession({ cli, daemonConvert, jpiExtension, extraExtensions = [], modelRef }) {
 		const pi = await import("@earendil-works/pi-coding-agent");
 		const { DefaultResourceLoader, SessionManager, createAgentSession, getAgentDir, ModelRuntime } = pi;
 		const { Type } = await import("typebox");
@@ -108,7 +108,7 @@ async function createSession({ cli, daemonConvert, jpiExtension, modelRef }) {
 		const loader = new DefaultResourceLoader({
 			cwd: process.cwd(),
 			agentDir: getAgentDir(),
-			additionalExtensionPaths: [jpiExtension],
+			additionalExtensionPaths: [jpiExtension, ...extraExtensions].filter(Boolean),
 			extensionFactories: factories,
 		});
 		await loader.reload();

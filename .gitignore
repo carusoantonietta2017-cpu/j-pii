@@ -52,6 +52,9 @@ Thumbs.db
 # ── scratch locale (il tracker è GitHub, non i file) ──
 .scratch/
 
+# ── wiki locali: stanno fuori progetto (~/wiki), mai nel repo ──
+wikis/
+
 # ── bench corpus: binari scaricati/generati, solo script+manifest versionati ──
 bench/corpus/native/
 bench/corpus/derived/

@@ -2,7 +2,7 @@
 // mask/restore core; analyzer is fake here (T2 plugs in rizzo-pii),
 // session mapping is a naive module map (T3 builds the real store).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { restore, restoreDeep, type Analyzer, type DoubtfulSpan } from "./mask.ts";
+import { restore, restoreDeep, remaskDeep, type Analyzer, type DoubtfulSpan } from "./mask.ts";
 import { createSessionStore, type SessionStore } from "./store.ts";
 import { reviewDoubtful, type ReviewDecision } from "./review.ts";
 import { rizzoAnalyzer } from "./rizzo.ts";
@@ -82,6 +82,14 @@ export async function maskTextForOcr(
 		out = out.split(d.value).join(ph);
 	}
 	return { text: out, doubtfulForced: doubtful.length };
+}
+
+/** History replay guard (issue #52): the restore pass persists real values
+ *  into stored assistant messages, and the walk below trusts assistant
+ *  history. Rebase known values to their placeholders first, so the model
+ *  sees exactly what it saw. New values are still masked by maskStrings. */
+export function rebaseHistory<T>(payload: T): T {
+	return remaskDeep(payload, sessionMapping);
 }
 
 export function partitionDecided(
@@ -240,7 +248,10 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", async (event, ctx) => {
 		try {
-			const { result, doubtful } = await maskStrings(JSON.parse(JSON.stringify(event.payload)), ctx.cwd);
+			const { result, doubtful } = await maskStrings(
+				rebaseHistory(JSON.parse(JSON.stringify(event.payload))),
+				ctx.cwd,
+			);
 			if (doubtful.length === 0) return result;
 			const { autoForce, autoClear, fresh } = partitionDecided(doubtful, forcedKeys, clearedKeys);
 			const forced = new Map<string, string>();

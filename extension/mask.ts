@@ -63,6 +63,40 @@ export function restore(text: string, mapping: Map<string, string>): string {
 	return out;
 }
 
+/** Minimum value length for reverse-mapping (history replay guard, issue #52).
+ *  Shorter values stay in clear in replayed history: blind replacement of
+ *  e.g. "MI" would corrupt innocent substrings ("FAMIGLIA"). Residual risk
+ *  on 1-3 char values (province abbreviations, ages, house numbers). */
+export const REMASK_MIN_LENGTH = 4;
+
+/** Reverse-restore: map known values back to their placeholders.
+ *  The restore pass persists real values into stored assistant messages;
+ *  before re-sending history, this puts back exactly what the model saw.
+ *  Longest values first so overlapping spans ("Rossi Mario" vs "Mario")
+ *  resolve to the widest placeholder. Unknown strings pass through. */
+export function remask(text: string, mapping: Map<string, string>): string {
+	const pairs = [...mapping].filter(([, v]) => v.length >= REMASK_MIN_LENGTH);
+	pairs.sort((a, b) => b[1].length - a[1].length);
+	let out = text;
+	for (const [ph, value] of pairs) {
+		if (out.includes(value)) out = out.split(value).join(ph);
+	}
+	return out;
+}
+
+/** remask() over nested structures (whole provider payload): strings are
+ *  rebased, keys and non-strings pass through untouched. */
+export function remaskDeep<T>(value: T, mapping: Map<string, string>): T {
+	if (typeof value === "string") return remask(value, mapping) as T;
+	if (Array.isArray(value)) return value.map((v) => remaskDeep(v, mapping)) as T;
+	if (value && typeof value === "object") {
+		const o: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(value)) o[k] = remaskDeep(v, mapping);
+		return o as T;
+	}
+	return value;
+}
+
 /** Restore placeholders in nested structures (tool args): strings are
 restored, unknown placeholders and non-strings pass through untouched. */
 export function restoreDeep<T>(value: T, mapping: Map<string, string>): T {

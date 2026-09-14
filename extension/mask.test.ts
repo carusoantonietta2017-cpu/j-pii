@@ -2,7 +2,7 @@
 // Vocabulary from CONTEXT.md: placeholder, mapping, mask, restore.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mask, restore, restoreDeep, type Analyzer } from "./mask.ts";
+import { mask, restore, restoreDeep, remask, remaskDeep, type Analyzer } from "./mask.ts";
 
 const CF = "RSSMRA80A01H501U";
 
@@ -47,6 +47,49 @@ test("restore swaps placeholders back, leaving unknown ones untouched", () => {
 		restore("codice [CF_1], mail [EMAIL_1], ignoto [CF_9]", mapping),
 		`codice ${CF}, mail mario.rossi@example.it, ignoto [CF_9]`,
 	);
+});
+
+test("remask maps known values back, longest first", () => {
+	const mapping = new Map([
+		["[FULLNAME_1]", "Rossi Mario"],
+		["[CF_1]", CF],
+	]);
+	assert.equal(
+		remask(`sig. Rossi Mario ${CF} fine`, mapping),
+		"sig. [FULLNAME_1] [CF_1] fine",
+	);
+	// overlapping spans resolve to the widest placeholder
+	const overlap = new Map([
+		["[FULLNAME_1]", "Rossi Mario"],
+		["[FULLNAME_2]", "Mario"],
+	]);
+	assert.equal(remask("Rossi Mario", overlap), "[FULLNAME_1]");
+	assert.equal(remask("niente da nascondere", mapping), "niente da nascondere");
+});
+
+test("remask skips 1-3 char values (no substring corruption)", () => {
+	const mapping = new Map([["[PROVINCE_1]", "MI"]]);
+	assert.equal(remask("FAMIGLIA MI", mapping), "FAMIGLIA MI");
+});
+
+test("remaskDeep rebases nested payloads, keys and non-strings untouched", () => {
+	const mapping = new Map([["[CF_1]", CF]]);
+	const payload = {
+		[CF]: "key stays",
+		messages: [
+			{ role: "assistant", content: [{ type: "text", text: `ripeti ${CF}` }] },
+			{ role: "user", content: `dato ${CF} fine` },
+		],
+		n: 3,
+	};
+	const out = remaskDeep(payload, mapping);
+	assert.equal(out[CF], "key stays");
+	assert.equal(
+		(out.messages[0].content as Array<{ text: string }>)[0].text,
+		"ripeti [CF_1]",
+	);
+	assert.equal(out.messages[1].content, "dato [CF_1] fine");
+	assert.equal(out.n, 3);
 });
 
 test("restoreDeep swaps placeholders in nested tool args", () => {

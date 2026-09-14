@@ -717,6 +717,11 @@ export function createApp() {
 						cli: dockCli,
 						daemonConvert: (a) => daemon.convert({ ...a, workdir: join(tmpdir(), "ocr-pi") }, process.cwd()),
 						jpiExtension: join(OCR_PI, "..", "extension", "j-pii.ts"),
+						// Opt-in spento di default: logga ogni payload LLM-bound (già mascherato)
+						// in /tmp/jpii-payload.log. Serve riavvio: JPII_DEBUG_PAYLOAD=1 ./start.sh web
+						extraExtensions: process.env.JPII_DEBUG_PAYLOAD === "1"
+							? [join(OCR_PI, "..", "extension", "debug-payload.ts")]
+							: [],
 						model: process.env.UI_MODEL ?? "opencode/muse-spark-1.3-contributor-free",
 					};
 					const timeoutMs = Number(process.env.UI_CHAT_TIMEOUT_MS ?? 180000);

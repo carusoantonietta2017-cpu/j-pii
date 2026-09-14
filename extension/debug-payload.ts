@@ -1,4 +1,4 @@
-// DEBUG ONLY — never ship enabled. Dumps a compact view of every
+// DEBUG ONLY — never ship enabled. Dumps a wide view (2000 chars/msg) of every
 // LLM-bound message to /tmp/jpii-payload.log so you can verify with your
 // own eyes that only placeholders travel. Usage:
 // pi -e ./extension/j-pii.ts -e ./extension/debug-payload.ts
@@ -33,14 +33,14 @@ export default function (pi: ExtensionAPI) {
 		const lines = [`\n===== ${new Date().toISOString()} OUTBOUND (${items.length} items) =====`];
 		for (const m of items) {
 			if (typeof m === "string") {
-				lines.push(`[string] ${m.slice(0, 300)}`);
+				lines.push(`[string] ${m.slice(0, 2000)}`);
 				continue;
 			}
 			if (m && typeof m === "object") {
 				const o = m as Record<string, unknown>;
 				const who = String(o.role ?? o.type ?? "?");
 				const text = textOf(o.content ?? o.output ?? o.text ?? "");
-				lines.push(`[${who}] ${String(text).slice(0, 300)}`);
+				lines.push(`[${who}] ${String(text).slice(0, 2000)}`);
 			}
 		}
 		appendFileSync(LOG, lines.join("\n") + "\n", "utf8");

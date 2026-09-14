@@ -3,7 +3,7 @@
 // such as model ids untouched.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { maskStrings, resolveFreshDoubtful } from "./j-pii.ts";
+import { maskStrings, rebaseHistory, resolveFreshDoubtful } from "./j-pii.ts";
 
 process.env.JPII_ANALYZER = "fake";
 
@@ -85,6 +85,27 @@ test("walk scopes to message content, infrastructure strings untouched", async (
 	const blocks = out.result.messages[2].content;
 	assert.ok(Array.isArray(blocks));
 	assert.equal((blocks[0] as { text: string }).text, `ripeti ${CF}`);
+});
+
+// Regression (issue #52): restored assistant history must not replay real
+// values outbound. After a user turn populates the session mapping, history
+// carrying the restored value rebases to the same placeholder.
+test("rebaseHistory puts restored assistant values back to placeholders", async () => {
+	const EMAIL = "mario.rossi@example.it";
+	await maskStrings({ messages: [{ role: "user", content: `scrivi a ${EMAIL} grazie` }] });
+	const replay = {
+		messages: [
+			{ role: "user", content: "scrivi a [EMAIL_1] grazie" },
+			{
+				role: "assistant",
+				content: [{ type: "text", text: `Ho scritto a ${EMAIL}, fatto` }],
+			},
+		],
+	};
+	const out = rebaseHistory(replay);
+	assert.equal(JSON.stringify(out).includes(EMAIL), false);
+	const blocks = out.messages[1].content as Array<{ text: string }>;
+	assert.match(blocks[0].text, /Ho scritto a \[EMAIL_\d+\], fatto/);
 });
 
 test("walk scopes Responses-API input, masking content and outputs only", async () => {
